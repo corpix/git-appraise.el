@@ -51,6 +51,20 @@
                 (setq msg (concat (substring msg 0 12000) "\n...truncated...")))
               (message "----- FAIL %s (%s) -----" name type)
               (message "%s" msg)
+              (when (and (fboundp 'ert-test-result-with-condition-backtrace)
+                         (ert-test-result-with-condition-p result))
+                (let* ((bt (ert-test-result-with-condition-backtrace result))
+                       (shown 0))
+                  (when bt
+                    (message "Backtrace (trimmed):")
+                    (cl-loop for frame in bt do
+                             (when (< shown 12)
+                               (let ((s (substring-no-properties (format "%S" (strip frame)))))
+                                 (unless (string-match-p "ert--\\|ert-run\\|command-line\\|normal-top-level\\|load-with-code-conversion\\|handler-bind" s)
+                                   (when (> (length s) 300)
+                                     (setq s (concat (substring s 0 300) "...")))
+                                   (message "  %s" s)
+                                   (cl-incf shown))))))))
               (message "----- END %s -----" name)))
         (error
          (message "----- FAIL %s (could not format condition) -----" name)))))
