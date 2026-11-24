@@ -19,7 +19,7 @@ Conversation (0)
 No conversation found.
 Files changed (3 files; 3 additions, 3 deletions)
   3/4 viewed
-modified        +2 -2       big.txt  [VIEWED]
+modified        +2 -2       ✓       big.txt
 
 @@ -1,5 +1,5 @@
  l1
@@ -36,11 +36,11 @@ modified        +2 -2       big.txt  [VIEWED]
 +L10
  l11
  l12
-modified                    mode.sh
+modified                            mode.sh
 
 old mode 100644
 new mode 100755
-modified        +1 -1       other.txt  [VIEWED]
+modified        +1 -1       ✓       other.txt
 
 @@ -1 +1 @@
 -keep

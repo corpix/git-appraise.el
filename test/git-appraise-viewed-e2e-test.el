@@ -116,7 +116,7 @@ the countable items are 3 hunks + 1 hunk-less file."
   (git-appraise-viewed-e2e-test--with-review
     (git-appraise-viewed-e2e-test--build directory revision)
     ;; an untouched review has no marks anywhere
-    (should-not (string-match-p "\\[VIEWED\\]" (git-appraise-viewed-e2e-test--rendered)))
+    (should-not (string-match-p "✓" (git-appraise-viewed-e2e-test--rendered)))
     (should (string-match-p "0/4 viewed" (git-appraise-viewed-e2e-test--rendered)))
     ;; one of big.txt's two hunks: counted, but the file is incomplete
     ;; so the rollup does not light the file tag yet
@@ -126,7 +126,7 @@ the countable items are 3 hunks + 1 hunk-less file."
     (git-appraise-viewed-e2e-test--build directory revision)
     (let ((rendered (git-appraise-viewed-e2e-test--rendered)))
       (should (string-match-p "1/4 viewed" rendered))
-      (should-not (string-match-p "\\[VIEWED\\]" rendered)))
+      (should-not (string-match-p "✓" rendered)))
     ;; all of big.txt's hunks: the file is viewed (the rollup), the
     ;; tag appears exactly once, and the no-hunk file stays untagged
     (git-appraise-viewed-e2e-test--write
@@ -139,10 +139,10 @@ the countable items are 3 hunks + 1 hunk-less file."
         (goto-char (point-min))
         (should (re-search-forward "^modified[ \t]+.*big\\.txt" nil t))
         (should (string-match-p
-                 "\\[VIEWED\\]"
+                 "✓"
                  (buffer-substring-no-properties
                   (line-beginning-position) (line-end-position))))
-        (should (= (how-many "\\[VIEWED\\]" (point-min) (point-max)) 1))))))
+        (should (= (how-many "✓" (point-min) (point-max)) 1))))))
 
 ;;; req-2026-11-24-014: hunk dimming
 (ert-deftest viewed-e2e/req-2026-11-24-014-hunk-dimming ()
@@ -171,12 +171,12 @@ the countable items are 3 hunks + 1 hunk-less file."
     (let ((git-appraise-lazy-enabled t))
       (git-appraise-viewed-e2e-test--build directory revision)
       (let ((rendered (git-appraise-viewed-e2e-test--rendered)))
-        (should (string-match-p "\\[VIEWED\\]" rendered))
+        (should (string-match-p "✓" rendered))
         (should (string-match-p "2/4 viewed" rendered))))
     (let ((git-appraise-lazy-enabled nil))
       (git-appraise-viewed-e2e-test--build directory revision)
       (let ((rendered (git-appraise-viewed-e2e-test--rendered)))
-        (should (string-match-p "\\[VIEWED\\]" rendered))
+        (should (string-match-p "✓" rendered))
         (should (string-match-p "2/4 viewed" rendered))))))
 
 ;;; req-2026-11-24-016: malformed note safe default
@@ -190,7 +190,7 @@ the countable items are 3 hunks + 1 hunk-less file."
     (git-appraise-viewed-e2e-test--build directory revision)
     (let ((rendered (git-appraise-viewed-e2e-test--rendered)))
       (should (string-match-p "0/4 viewed" rendered))
-      (should-not (string-match-p "\\[VIEWED\\]" rendered)))))
+      (should-not (string-match-p "✓" rendered)))))
 
 (defun git-appraise-viewed-e2e-test--note-events (directory revision)
   "The raw event lines currently stored on REVISION's note."
@@ -256,7 +256,7 @@ the countable items are 3 hunks + 1 hunk-less file."
         (goto-char (point-min))
         (re-search-forward "^modified[ \t]+.*big\\.txt")
         (should (string-match-p
-                 "\\[VIEWED\\]"
+                 "✓"
                  (buffer-substring-no-properties
                   (line-beginning-position) (line-end-position))))))
     ;; unmarking one hunk drops the file rollup
@@ -266,7 +266,7 @@ the countable items are 3 hunks + 1 hunk-less file."
                         directory revision))
                3))
     (should (string-match-p "1/4 viewed" (git-appraise-viewed-e2e-test--rendered)))
-    (should-not (string-match-p "\\[VIEWED\\]"
+    (should-not (string-match-p "✓"
                                 (git-appraise-viewed-e2e-test--rendered)))
     ;; V from inside the incomplete file completes it: only the
     ;; missing hunk is written
@@ -305,7 +305,7 @@ the countable items are 3 hunks + 1 hunk-less file."
       (goto-char (point-min))
       (re-search-forward "^modified[ \t]+.*mode\\.sh")
       (should (string-match-p
-               "\\[VIEWED\\]"
+               "✓"
                (buffer-substring-no-properties
                 (line-beginning-position) (line-end-position)))))
     ;; toggling again clears it
@@ -503,15 +503,15 @@ the countable items are 3 hunks + 1 hunk-less file."
     (git-appraise-viewed-e2e-test--build directory revision)
     (with-current-buffer (git-appraise-pr-buffer-name)
       (should (string-match-p "3/4 viewed" (buffer-string)))
-      (should (string-match-p "big\\.txt.*\\[VIEWED\\]" (buffer-string)))
-      (should (string-match-p "other\\.txt.*\\[VIEWED\\]" (buffer-string))))
+      (should (string-match-p "✓.*big\\.txt" (buffer-string)))
+      (should (string-match-p "✓.*other\\.txt" (buffer-string))))
     (kill-buffer (git-appraise-pr-buffer-name))
     (git-appraise-viewed-e2e-test--build directory revision)
     (with-current-buffer (git-appraise-pr-buffer-name)
       (should (string-match-p "3/4 viewed" (buffer-string)))
-      (should (string-match-p "big\\.txt.*\\[VIEWED\\]" (buffer-string)))
-      (should (string-match-p "other\\.txt.*\\[VIEWED\\]" (buffer-string)))
-      (should-not (string-match-p "mode\\.sh.*\\[VIEWED\\]" (buffer-string))))))
+      (should (string-match-p "✓.*big\\.txt" (buffer-string)))
+      (should (string-match-p "✓.*other\\.txt" (buffer-string)))
+      (should-not (string-match-p "✓.*mode\\.sh" (buffer-string))))))
 
 (defun git-appraise-viewed-e2e-test--file-fold-states ()
   "Alist of (path . folded?) for file sections in the current review buffer."

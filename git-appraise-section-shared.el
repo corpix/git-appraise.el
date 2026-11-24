@@ -78,10 +78,24 @@ For internal usage only.")
 ;; so persistence across mode re-runs is safe.
 (put 'git-appraise-section--file-classifications 'permanent-local t)
 
-(defconst git-appraise-section--viewed-tag "  [VIEWED]"
-  "The [VIEWED] tag on a file heading.
-Rendered by `git-appraise-wash--insert-file-tags' when the
-classification is flagged :viewed by the viewed projection.")
+(defcustom git-appraise-viewed-indicator "✓"
+  "Indicator shown for viewed files/hunks.
+Set to nil to disable."
+  :group 'git-appraise
+  :type '(choice (const :tag "Checkmark" "✓")
+                 (const :tag "None" nil)
+                 string))
+
+(defcustom git-appraise-comment-indicator "💬"
+  "Icon shown before comment counts in file headings.
+Set to nil to disable the comment count column."
+  :group 'git-appraise
+  :type '(choice (const :tag "Speech balloon" "💬")
+                 (const :tag "None" nil)
+                 string))
+
+(define-obsolete-variable-alias 'git-appraise-section--viewed-tag
+  'git-appraise-viewed-indicator "0.0.8")
 
 (defconst git-appraise-section--viewed-counter-format "%d/%d viewed"
   "The N/M viewed counter line below the Files changed heading.

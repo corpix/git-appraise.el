@@ -29,6 +29,9 @@
 (require 'git-appraise-utils)
 
 (declare-function git-appraise--diff--split-by-files "git-appraise-diff")
+(defvar git-appraise-viewed-indicator)
+(defvar git-appraise-section--changed-tag)
+(defvar git-appraise-show-file-change-summary)
 
 ;;; Identities
 
@@ -568,8 +571,7 @@ mark/unmark within one second must still order deterministically
       (goto-char (oref section start))
       (let ((bol (line-beginning-position))
             (eol (line-end-position)))
-        ;; reface only heading content carrying git-appraise-path; tags
-        ;; (NEW/viewed/changed/comments) are appended outside that property.
+        ;; reface only heading content carrying git-appraise-path.
         (let ((p bol))
           (while (< p eol)
             (let ((f (get-text-property p 'font-lock-face))
@@ -578,28 +580,37 @@ mark/unmark within one second must still order deterministically
                          (memq f '(magit-diff-file-heading git-appraise-dimmed)))
                 (put-text-property p next 'font-lock-face face))
               (setq p next))))
-        ;; rebuild viewed/changed tags, preserving comments badge.
-        (let* ((line (buffer-substring-no-properties bol (line-end-position)))
-               (vc-match (string-match "\\(  \\[viewed\\]\\|  \\[CHANGED\\]\\)+" line))
-               (comments-match (string-match "  \\[comments [0-9]+\\]" line))
-               (insert-at (cond
-                           (vc-match (+ bol (match-beginning 0)))
-                           (comments-match (+ bol (match-beginning 0)))
-                           (t (line-end-position)))))
-          (when vc-match
-            (delete-region (+ bol (match-beginning 0))
-                           (+ bol (match-end 0))))
-          (goto-char (min insert-at (line-end-position)))
-          (let ((sec-prop (get-text-property (line-beginning-position) 'magit-section))
-                (tag-start (point)))
-            (when (plist-get info :viewed)
-              (insert (propertize git-appraise-section--viewed-tag
-                                  'font-lock-face 'git-appraise-dimmed)))
-            (when (plist-get info :changed)
+        ;; update viewed column (fixed width 3 after status+tag+stats).
+        (let* ((stats-w (if git-appraise-show-file-change-summary 12 0))
+               (viewed-col (+ bol 11 5 stats-w))
+               (viewed-str (if (and git-appraise-viewed-indicator viewed?)
+                               git-appraise-viewed-indicator
+                             "")))
+          (when (<= (+ viewed-col 3) (line-end-position))
+            (let ((sec-prop (get-text-property viewed-col 'magit-section))
+                  (path-prop (get-text-property viewed-col 'git-appraise-path)))
+              (delete-region viewed-col (+ viewed-col 3))
+              (goto-char viewed-col)
+              (insert (propertize (format "%-3s" viewed-str)
+                                  'font-lock-face 'git-appraise-dimmed))
+              (when sec-prop
+                (put-text-property viewed-col (+ viewed-col 3) 'magit-section sec-prop))
+              (when path-prop
+                (put-text-property viewed-col (+ viewed-col 3) 'git-appraise-path path-prop)))))
+        ;; rebuild CHANGED trailing tag.
+        (let* ((line (buffer-substring-no-properties (line-beginning-position) (line-end-position)))
+               (changed-match (string-match "  \\[CHANGED\\]" line)))
+          (when changed-match
+            (delete-region (+ (line-beginning-position) (match-beginning 0))
+                           (+ (line-beginning-position) (match-end 0))))
+          (when (plist-get info :changed)
+            (goto-char (line-end-position))
+            (let ((sec-prop (get-text-property (line-beginning-position) 'magit-section))
+                  (tag-start (point)))
               (insert (propertize git-appraise-section--changed-tag
-                                  'font-lock-face 'git-appraise-dimmed)))
-            (when sec-prop
-              (put-text-property tag-start (point) 'magit-section sec-prop))))))))
+                                  'font-lock-face 'git-appraise-dimmed))
+              (when sec-prop
+                (put-text-property tag-start (point) 'magit-section sec-prop)))))))))
 
 (defun git-appraise-viewed--apply-hunk-heading-in-place (section path)
   "Update hunk SECTION heading for PATH to reflect viewed state."

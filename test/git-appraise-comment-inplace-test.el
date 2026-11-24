@@ -40,7 +40,7 @@ THE SYSTEM SHALL show its original location and content beside the affected file
     (git-appraise-test--run directory "git" "commit" "-qam" "followup")
     (git-appraise-comment-inplace-test--open-and-render revision)
     (with-current-buffer (get-buffer (git-appraise-pr-buffer-name))
-      (should (string-match-p "\\[comments 1\\]" (buffer-string)))
+      (should (string-match-p "💬1" (buffer-string)))
       (should (string-match-p "Earlier comment by .*example.txt:2" (buffer-string)))
       (should (string-match-p "Earlier line" (buffer-string)))
       (should-not (string-match-p "^  changed$" (buffer-string)))

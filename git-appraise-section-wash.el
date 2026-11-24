@@ -203,16 +203,9 @@ Delegates to magit's utility when available; identity otherwise."
   (when (plist-get info :new)
     (insert (propertize "  [NEW]"
                         'font-lock-face 'git-appraise-diff-tag-face)))
-  (when (plist-get info :viewed)
-    (insert (propertize git-appraise-section--viewed-tag
-                        'font-lock-face 'git-appraise-dimmed)))
   (when (plist-get info :changed)
     (insert (propertize git-appraise-section--changed-tag
-                        'font-lock-face 'git-appraise-dimmed)))
-  (let ((count (git-appraise-history--file-count clean-path)))
-    (when (> count 0)
-      (insert (propertize (format "  [comments %d]" count)
-                          'font-lock-face 'git-appraise-dimmed)))))
+                        'font-lock-face 'git-appraise-dimmed))))
 
 (defun git-appraise-wash--insert-file-heading
     (status display clean-path info &optional lazy)
@@ -246,6 +239,20 @@ INFO supplies its classification; LAZY marks a deferred file."
                                   (if (> deleted 0) 'magit-diff-removed 'git-appraise-dimmed)))
               (insert (make-string pad ?\s)))
           (insert (format "%-12s" ""))))
+      ;; viewed column
+      (let ((viewed-str (if (and git-appraise-viewed-indicator
+                                 (plist-get info :viewed))
+                            git-appraise-viewed-indicator
+                          "")))
+        (insert (propertize (format "%-3s" viewed-str)
+                            'font-lock-face 'git-appraise-dimmed)))
+      ;; comment count column
+      (let* ((count (git-appraise-history--file-count clean-path))
+             (comment-str (if (and git-appraise-comment-indicator (> count 0))
+                              (format "%s%d" git-appraise-comment-indicator count)
+                            "")))
+        (insert (propertize (format "%-5s" comment-str)
+                            'font-lock-face 'git-appraise-dimmed)))
       (insert (propertize display 'font-lock-face heading-face)))
     (add-text-properties beg (point)
                          `(git-appraise-path ,clean-path
