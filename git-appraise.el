@@ -2,7 +2,6 @@
 ;;
 ;; Copyright (C) 2026 Dmitry Moskowski
 ;;
-;; Maintainer: Andrea <andrea-dev@hotmail.com>
 ;; Version: 0.0.7
 ;; Keywords: git, tools, vc
 ;; Homepage: https://github.com/corpix/git-appraise.el

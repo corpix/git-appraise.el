@@ -3,7 +3,6 @@
 ;;
 ;; Copyright (C) 2026 Dmitry Moskowski
 ;;
-;; Author: Andrea <andrea-dev@hotmail.com>
 ;; Keywords: git, tools, vc
 ;; Homepage: https://github.com/corpix/git-appraise.el
 ;;

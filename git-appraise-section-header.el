@@ -2,13 +2,11 @@
 ;;
 ;; Copyright (C) 2026 Dmitry Moskowski
 ;;
-;; Maintainer: Andrea <andrea-dev@hotmail.com>
 ;; Keywords: git, tools, vc
 ;; Homepage: https://github.com/corpix/git-appraise.el
 ;;
 ;; Split from git-appraise-section.el (phase 15c):
 ;; git-appraise-section.el, moved verbatim by the split; the fork and
-;; this file are maintained by Andrea.
 
 ;; This file is not part of GNU Emacs
 
