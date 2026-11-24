@@ -28,4 +28,16 @@
                  t "-test\\.el\\'"))
     (load file nil t))
 
-  (ert-run-tests-batch-and-exit))
+  (let* ((raw (or (getenv "ERT_SELECTOR")
+                   (car command-line-args-left)))
+         (selector (cond
+                    ((null raw) t)
+                    ((equal raw "t") t)
+                    ((string-prefix-p "(" raw) (read raw))
+                    ((string-prefix-p "\"" raw) (read raw))
+                    (t raw))))
+    (when command-line-args-left
+      (setq command-line-args-left nil))
+    (when (not (eq selector t))
+      (message "ERT selector: %S" selector))
+    (ert-run-tests-batch-and-exit selector)))

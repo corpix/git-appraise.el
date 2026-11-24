@@ -34,9 +34,9 @@ compile:
                (unless (member f (quote (\"git-appraise-autoloads.el\" \"git-appraise-pkg.el\")) ) \
                  (byte-compile-file f)))"
 
-# Run the ERT test suite in batch mode.
-test:
-    {{emacs}} -Q --batch {{load_path}} -l test/run-tests.el
+# Run the ERT test suite in batch mode. Optional selector: just test pr-state/
+test selector="t":
+    ERT_SELECTOR='{{selector}}' {{emacs}} -Q --batch {{load_path}} -l test/run-tests.el
 
 # Compile then test.
 check: compile test
