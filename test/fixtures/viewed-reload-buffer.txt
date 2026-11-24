@@ -1,0 +1,48 @@
+Changes:         3 files; 3 additions, 3 deletions
+Author:          tester@example.com
+Title:           Viewed review
+State:           PENDING
+Refs:            refs/heads/master ... refs/heads/feature
+Reviewers:
+
+Commits (1)
+<HASH> [<DATE>] review changes
+
+Description
+
+Viewed review
+
+Your Review Feedback
+Leave a comment here.
+
+Conversation (0)
+No conversation found.
+Files changed (3 files; 3 additions, 3 deletions)
+  3/4 viewed
+modified        +2 -2       big.txt  [VIEWED]
+
+@@ -1,5 +1,5 @@
+ l1
+-l2
++L2
+ l3
+ l4
+ l5
+@@ -7,6 +7,6 @@ l6
+ l7
+ l8
+ l9
+-l10
++L10
+ l11
+ l12
+modified                    mode.sh
+
+old mode 100644
+new mode 100755
+modified        +1 -1       other.txt  [VIEWED]
+
+@@ -1 +1 @@
+-keep
++changed
+

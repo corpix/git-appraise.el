@@ -1,0 +1,29 @@
+name: checks
+on:
+  pull_request:
+  push:
+    branches: [master]
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compile:
+    runs-on: nix
+    strategy:
+      matrix:
+        arch: [x86_64-linux]
+    steps:
+      - uses: https://git.tatikoma.dev/corpix/checkout-action@v3
+        with:
+          fetch-depth: 50
+      - run: nix develop .#devShells.${{ matrix.arch }}.default --command just compile
+  test:
+    runs-on: nix
+    strategy:
+      matrix:
+        arch: [x86_64-linux]
+    steps:
+      - uses: https://git.tatikoma.dev/corpix/checkout-action@v3
+        with:
+          fetch-depth: 50
+      - run: nix develop .#devShells.${{ matrix.arch }}.default --command just test
