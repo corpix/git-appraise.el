@@ -143,5 +143,68 @@ temp-directory name prefix."
          (git-appraise-test--reset-db)
          (delete-directory ,dir t)))))
 
+;;; Failure artifacts
+
+(defcustom git-appraise-test-artifact-dir "/tmp/git-appraise-test"
+  "Directory for test failure artifacts."
+  :type 'string
+  :group 'git-appraise)
+
+(defun git-appraise-test--artifact-file (name)
+  "Return artifact path for NAME, creating directory as needed."
+  (let* ((dir (file-name-as-directory git-appraise-test-artifact-dir))
+         (test (ert-running-test))
+         (slug (if test
+                   (replace-regexp-in-string "[^[:alnum:]._/-]" "_"
+                                             (format "%s" (ert-test-name test)))
+                 "unknown-test"))
+         (path (expand-file-name name (expand-file-name slug dir))))
+    (make-directory (file-name-directory path) t)
+    path))
+
+(defun git-appraise-test--write-artifact (name text)
+  "Write TEXT to artifact NAME and return its path."
+  (let ((path (git-appraise-test--artifact-file name)))
+    (with-temp-file path
+      (insert (if (stringp text) text (format "%S" text))))
+    path))
+
+(defun git-appraise-test--should-equal-text (actual expected &optional label)
+  "Assert ACTUAL equals EXPECTED as plain text.
+On failure, write artifacts and include a unified diff in the message."
+  (let ((a (substring-no-properties (or actual "")))
+        (e (substring-no-properties (or expected ""))))
+    (unless (equal a e)
+      (let* ((label (or label "text mismatch"))
+             (af (git-appraise-test--write-artifact "actual.txt" a))
+             (ef (git-appraise-test--write-artifact "expected.txt" e))
+             (df (git-appraise-test--write-artifact "diff.patch" ""))
+             (diff (with-temp-buffer
+                     (call-process "diff" nil t nil "-u" ef af)
+                     (buffer-string))))
+        (with-temp-file df (insert diff))
+        (ert-fail
+         (format "%s\nactual:   %s\nexpected: %s\ndiff:     %s\n\n%s"
+                 label af ef df
+                 (if (> (length diff) 6000)
+                     (concat (substring diff 0 6000) "\n...diff truncated...")
+                   diff)))))))
+
+(defun git-appraise-test--assert-fixture (actual fixture &optional normalize)
+  "Assert ACTUAL matches FIXTURE file contents.
+NORMALIZE, when non-nil, is called on ACTUAL before comparison.
+When `GIT_APPRAISE_TEST_ACCEPT' is set, overwrite FIXTURE with ACTUAL."
+  (let* ((actual (substring-no-properties (or actual "")))
+         (actual (if normalize (funcall normalize actual) actual))
+         (expected (with-temp-buffer
+                     (insert-file-contents fixture)
+                     (buffer-string))))
+    (if (getenv "GIT_APPRAISE_TEST_ACCEPT")
+        (unless (equal actual expected)
+          (with-temp-file fixture (insert actual))
+          (message "Accepted fixture: %s" fixture))
+      (git-appraise-test--should-equal-text
+       actual expected (file-name-nondirectory fixture)))))
+
 (provide 'git-appraise-test-helpers)
 ;;; git-appraise-test-helpers.el ends here
