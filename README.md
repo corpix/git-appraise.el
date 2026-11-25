@@ -109,8 +109,8 @@ published by `git-appraise push`. See `docs/viewed-state.md`.
 ;; Keep files marked generated or vendored by .gitattributes visible.
 (setq git-appraise-exclude-gitattributes-generated nil)
 
-;; Stop folding hunks when a review opens.
-(setq git-appraise-fold-hunks-by-default nil)
+;; Open files and their unchosen hunks when a review opens.
+(setq git-appraise-fold-files-by-default nil)
 
 ;; Folded hunks with comments show a marker. Customize its text or face.
 (setq git-appraise-commented-hunk-indicator "  [comment]")

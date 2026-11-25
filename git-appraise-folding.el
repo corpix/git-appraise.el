@@ -21,7 +21,9 @@
   section)
 
 (defcustom git-appraise-fold-hunks-by-default t
-  "Start the review with every hunk folded."
+  "Default fold choice for hunk sections without a diff identity
+(rename and mode header sections).  Diff hunks without a saved
+choice always follow their file's fold."
   :group 'git-appraise
   :type 'boolean)
 (defcustom git-appraise-fold-files-by-default t
@@ -99,12 +101,13 @@ on the overlay covering section content."
 (defun git-appraise-section--fold-hunks (section &optional keep-visible?)
   "Fold every hunk section under SECTION, recursively.
 The default open state: the buffer shows the affected files'
-headings, one TAB away from the diffs.  On a fresh render or
-right after a reload every hunk folds.  With KEEP-VISIBLE? (a
-plain re-render), hunks that inherited an EXPANDED state from the
-old tree stay open — the re-render only re-applies the invisible
-overlay of the folded ones, because `hidden' alone conceals
-nothing outside a `magit-refresh-buffer' pass."
+headings, one TAB away from the diffs.  Hunks without a saved
+choice are left open, so opening their file reveals them.  With
+KEEP-VISIBLE? (a plain re-render), hunks that inherited an
+EXPANDED state from the old tree stay open — the re-render only
+re-applies the invisible overlay of the folded ones, because
+`hidden' alone conceals nothing outside a `magit-refresh-buffer'
+pass."
   (dolist (c (oref section children))
     (if (cl-typep c 'magit-hunk-section)
         (let ((folded (git-appraise-fold-state--hunk-folded-p c))
@@ -151,7 +154,22 @@ nothing outside a `magit-refresh-buffer' pass."
     (unless target (user-error "No changed file at point"))
     (git-appraise-fold-state--write (list target) folded)
     (if folded (magit-section-hide section)
-      (magit-section-show section))))
+      (magit-section-show section)
+      ;; Unset hunk choices inherit the now open file.  Saved hunk
+      ;; choices remain independent of the file choice.
+      (--each (oref section children)
+        (when (and (magit-hunk-section-p it)
+                   (not (git-appraise-fold-state--hunk-folded-p it)))
+          (magit-section-show it))))))
+
+(defun git-appraise-folding--set-hunk (section folded)
+  "Set hunk SECTION to FOLDED and persist its choice."
+  (pcase (git-appraise-fold-state--hunk-identity section)
+    (`(,path ,fp ,range)
+     (git-appraise-fold-state--write
+      (list (list "hunk" path fp range)) folded)))
+  (if folded (magit-section-hide section)
+    (magit-section-show section)))
 
 (defun git-appraise-folding--file-hunk-targets (section)
   "Return all persistent hunk targets of file SECTION."
@@ -256,13 +274,8 @@ sync the slot to the visual state so toggling behaves as the user sees."
       (git-appraise-folding--set-file
        section (not (git-appraise-folding--effective-hidden-p section))))
      ((magit-hunk-section-p section)
-      (let ((hidden (git-appraise-folding--effective-hidden-p section)))
-        (pcase (git-appraise-fold-state--hunk-identity section)
-          (`(,path ,fp ,range)
-           (git-appraise-fold-state--write
-            (list (list "hunk" path fp range)) (not hidden))
-           (magit-section-toggle section))
-          (_ (magit-section-toggle section)))))
+      (git-appraise-folding--set-hunk
+       section (not (git-appraise-folding--effective-hidden-p section))))
      (t (magit-section-toggle section)))))
 
 (defvar-local git-appraise-fold-level nil

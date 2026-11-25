@@ -466,12 +466,12 @@
         (git-appraise-fold-file-at-point)
         (should (oref file hidden))))))
 
-;;; req-2026-11-24-111: files and hunks open folded
+;;; req-2026-11-24-111: opening a file reveals unchosen hunks
 ;; covers: git-appraise-folding.el git-appraise-section-wash.el git-appraise-lazy.el
 ;; covers-fn: git-appraise-section--fold-hunks, git-appraise-wash-insert-file-section
 ;; enforcement: test
 (ert-deftest git-appraise-actions/req-2026-11-24-111-folded-file-layout ()
-  "WHEN a reviewer opens a diff THE SYSTEM SHALL show adjacent folded file headings and reveal folded hunks with a single separating line."
+  "WHEN a reviewer opens a diff THE SYSTEM SHALL keep files collapsed until opened, then reveal code changes without saved fold choices."
   (let ((git-appraise-actions-test-before-request
          (lambda (directory)
            (with-temp-file (expand-file-name "other.txt" directory)
@@ -502,8 +502,11 @@
           (goto-char (oref (car files) content))
           (should (looking-at-p "^[[:space:]]*$"))
           (should-not (invisible-p (point)))
-          (should (--any? (and (magit-hunk-section-p it) (oref it hidden))
-                         (oref (car files) children))))))))
+          (should (--any? (magit-hunk-section-p it)
+                         (oref (car files) children)))
+          (should-not (--any? (and (magit-hunk-section-p it)
+                                  (oref it hidden))
+                             (oref (car files) children))))))))
 
 ;;; req-2026-11-24-112: fold choices survive reopening
 ;; covers: git-appraise-fold-state.el git-appraise-folding.el

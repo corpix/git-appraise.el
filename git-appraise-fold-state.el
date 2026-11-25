@@ -119,11 +119,13 @@
     (when hunk (list path (plist-get hunk :fp) range))))
 
 (defun git-appraise-fold-state--hunk-folded-p (section)
-  "Whether hunk SECTION is folded according to saved choices."
+  "Whether hunk SECTION is folded according to saved choices.
+Hunks without a saved choice are never folded: only their file's
+fold conceals them, so any way of opening the file reveals them."
   (pcase (git-appraise-fold-state--hunk-identity section)
     (`(,path ,fp ,range)
      (let ((choice (git-appraise-fold-state--choice "hunk" path fp range)))
-       (if (eq choice 'unset) git-appraise-fold-hunks-by-default choice)))
+       (if (eq choice 'unset) nil choice)))
     (_ git-appraise-fold-hunks-by-default)))
 
 (defun git-appraise-fold-state--make-event (item path fp range folded actor)

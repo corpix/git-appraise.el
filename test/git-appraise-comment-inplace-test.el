@@ -334,8 +334,7 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
     (git-appraise-test--run
      directory "git-appraise" "comment" "-m" "Sent inline"
      "-f" "example.txt" "-l" "2" revision)
-    (let ((git-appraise-lazy-enabled nil)
-          (git-appraise-fold-hunks-by-default t))
+    (let ((git-appraise-lazy-enabled nil))
       (git-appraise-comment-inplace-test--open-and-render revision)
       (with-current-buffer (get-buffer (git-appraise-pr-buffer-name))
         (let (hunk)
@@ -344,6 +343,9 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
              (when (eq (oref s type) 'hunk)
                (setq hunk s))))
           (should hunk)
+          ;; unsaved hunk state follows the file: fold it explicitly
+          (git-appraise-folding--set-file (oref hunk parent) nil)
+          (git-appraise-folding--set-hunk hunk t)
           (should (oref hunk hidden))
           (should (= 1 (--count (overlay-get it 'git-appraise-commented-hunk)
                                 (overlays-in (point-min) (point-max)))))
@@ -510,13 +512,20 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
 (ert-deftest git-appraise-comment-inplace/req-2026-11-24-102-folded-hunk-conceals-new-comment ()
   "WHEN a draft is committed on a hunk's final line while the hunk is already folded THE SYSTEM SHALL conceal the new comment immediately and keep the collapsed-comment indicator."
   (git-appraise-comment-inplace-test-with-repo
-    (let ((git-appraise-lazy-enabled nil)
-          (git-appraise-fold-hunks-by-default t))
+    (let ((git-appraise-lazy-enabled nil))
       (git-appraise-comment-inplace-test--open-and-render revision)
       (let ((buf (get-buffer (git-appraise-pr-buffer-name)))
             pos
             comment)
         (with-current-buffer buf
+          ;; unsaved hunk state follows the file: fold the hunk explicitly
+          (let (hunk)
+            (magit-map-sections
+             (lambda (s) (when (eq (oref s type) 'hunk) (setq hunk s)))
+             magit-root-section)
+            (should hunk)
+            (git-appraise-folding--set-file (oref hunk parent) nil)
+            (git-appraise-folding--set-hunk hunk t))
           (goto-char (point-min))
           (re-search-forward "^\\+third" nil t)
           (setq pos (match-beginning 0)
@@ -623,14 +632,14 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
                 (should (string-match-p "example.txt" (a-get node 'bodyHTML)))
                 (should (string-match-p "file level note" (a-get node 'bodyHTML)))
                 (should (a-get node 'databaseId)))
-              ;; shown in Conversation; the hunks re-folded as usual
+              ;; shown in Conversation; the files stay folded as usual
               (with-current-buffer buf
                 (goto-char (point-min))
                 (should (search-forward "file" nil t))
                 (should (search-forward "level" nil t))
                 (should (search-forward "note" nil t))
                 (should
-                 (--any? (and (eq (oref it type) 'hunk) (oref it hidden))
+                 (--any? (and (eq (oref it type) 'file) (oref it hidden))
                          (let (all)
                            (magit-map-sections
                             (lambda (s) (push s all)) magit-root-section)

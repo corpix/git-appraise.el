@@ -180,6 +180,34 @@
             (should (= (caar after) (marker-position (oref file content))))
             (should (= (cadar after) (marker-position (oref file end))))))))))
 
+;;; req-2026-11-25-070: open files reveal hunks without saved choices
+;; covers: git-appraise-fold-state.el git-appraise-folding.el
+;; covers-fn: git-appraise-fold-state--hunk-folded-p, git-appraise-folding--set-file, git-appraise-unfold-all-files
+;; enforcement: test
+(ert-deftest fold-interactive-e2e/req-2026-11-25-070-unset-hunks-follow-open-file ()
+  "WHEN a reviewer unfolds a file THE SYSTEM SHALL show hunks without saved fold choices across reloads."
+  (git-appraise-viewed-e2e-test--with-review
+    (let ((git-appraise-lazy-enabled nil))
+      (git-appraise-fold-interactive-e2e-test--build directory revision))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (pcase-let ((`(,file ,hunk)
+                   (git-appraise-fold-interactive-e2e-test--first-file-and-hunk)))
+        (should hunk)
+        (git-appraise-folding--set-file file nil)
+        (should-not (oref hunk hidden))
+        (git-appraise-reload)
+        (git-appraise-test--drain-lazy (current-buffer))
+        (pcase-let ((`(,new-file ,new-hunk)
+                     (git-appraise-fold-interactive-e2e-test--first-file-and-hunk)))
+          (should-not (oref new-file hidden))
+          (should-not (oref new-hunk hidden))
+          ;; "Unfold all files" must reveal them the same way.
+          (git-appraise-fold-all-files)
+          (git-appraise-unfold-all-files)
+          (should-not (oref new-hunk hidden))
+          (should-not (git-appraise-folding--body-visually-hidden-p
+                       new-hunk)))))))
+
 (defun git-appraise-fold-interactive-e2e-test--first-file-and-hunk ()
   "Return the first file section and its first real hunk."
   (let (file)
