@@ -722,5 +722,37 @@ against the new diff instead of blocking the send."
     (git-appraise-backend-abandon root revision message)
     (message "Review abandoned: %s" revision)))
 
+(defun git-appraise-backend-push (directory &optional remote)
+  "Push git-appraise notes from DIRECTORY to REMOTE.
+REMOTE defaults to \"origin\"."
+  (git-appraise-backend--run directory "push" (or remote "origin")))
+
+(defun git-appraise-backend-pull (directory &optional remote)
+  "Pull git-appraise notes into DIRECTORY from REMOTE.
+REMOTE defaults to \"origin\"."
+  (git-appraise-backend--run directory "pull" (or remote "origin")))
+
+;;;###autoload
+(defun git-appraise-push-notes (&optional remote)
+  "Push git-appraise notes to REMOTE."
+  (interactive
+   (list (read-string "Remote: " "origin")))
+  (let ((root (git-appraise-backend--root)))
+    (message "Pushing git-appraise notes to %s..." remote)
+    (git-appraise-backend-push root remote)
+    (message "Pushed git-appraise notes to %s" remote)))
+
+;;;###autoload
+(defun git-appraise-pull-notes (&optional remote)
+  "Pull git-appraise notes from REMOTE."
+  (interactive
+   (list (read-string "Remote: " "origin")))
+  (let ((root (git-appraise-backend--root)))
+    (message "Pulling git-appraise notes from %s..." remote)
+    (git-appraise-backend-pull root remote)
+    (when (fboundp 'git-appraise--build-buffer)
+      (ignore-errors (git-appraise--build-buffer)))
+    (message "Pulled git-appraise notes from %s" remote)))
+
 (provide 'git-appraise-backend)
 ;;; git-appraise-backend.el ends here

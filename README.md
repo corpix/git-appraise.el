@@ -68,6 +68,8 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `r a` / `r r` / `r c` | Accept, reject, or submit comments |
 | Review buffer | `r l` | Accept with the configured LGTM message |
 | Review buffer | `r s c` | Send a general comment |
+| Review buffer | `r A` | Abandon the current review |
+| Review buffer | `r p` / `r P` | Push or pull git-appraise notes |
 
 Drafted inline comments survive a reload while the review head is unchanged.
 If the head changed, reload asks before discarding them. A rejection needs
@@ -115,8 +117,10 @@ other reviewers' comments are customizable through the
 `git-appraise-comment-self-bg`, `git-appraise-comment-author-bg`, and
 `git-appraise-comment-other-bg` faces.
 
-The backend invokes the local `git-appraise` CLI. It does not push or pull Git
-notes, so share them separately if other reviewers need to see them.
+The backend invokes the local `git-appraise` CLI. Use `git-appraise-push-notes`
+/ `git-appraise-pull-notes` (or the `R`/`r` manage menus) to sync git-appraise
+notes with a remote. Viewed marks live in separate local notes and are not
+pushed by `git-appraise push`.
 
 ## Development
 

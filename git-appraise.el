@@ -120,7 +120,9 @@ offers local reviews instead of prompting for a URL."
     ("o" "Open" git-appraise-magit-start-appraise)
     ("n" "New" git-appraise-backend-request)]
    ["Manage"
-    ("a" "Abandon" git-appraise-abandon-review)]])
+    ("a" "Abandon" git-appraise-abandon-review)
+    ("p" "Push" git-appraise-push-notes)
+    ("P" "Pull" git-appraise-pull-notes)]])
 
 (defun git-appraise-magit-start-appraise ()
   "Select a local git-appraise review from the current repository."
@@ -158,7 +160,9 @@ offers local reviews instead of prompting for a URL."
     ("G" "Reload" git-appraise-reload)
     ("q" "Quit" transient-quit-one)]
    ["Manage"
-    ("A" "Abandon" git-appraise-abandon-current-review)]])
+    ("A" "Abandon" git-appraise-abandon-current-review)
+    ("p" "Push" git-appraise-push-notes)
+    ("P" "Pull" git-appraise-pull-notes)]])
 
 (defvar git-appraise-mode-map
   (let ((map (copy-keymap magit-section-mode-map)))
