@@ -16,6 +16,7 @@
 
 (declare-function git-appraise-backend-abandon "git-appraise-backend")
 (declare-function git-appraise-backend-rebase "git-appraise-backend")
+(declare-function git-appraise-backend-land-review "git-appraise-backend")
 (declare-function git-appraise-backend--root "git-appraise-backend")
 
 (defcustom git-appraise-lgtm-message "LGTM! :thumbsup:"
@@ -332,6 +333,31 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
       (let ((git-appraise-section-full-refresh? t))
         (git-appraise-reload)))
     (message "Review rebased")))
+
+;;;###autoload
+(defun git-appraise-land-current-review (strategy)
+  "Land the current git-appraise review using STRATEGY."
+  (interactive
+   (let ((strategy (completing-read "Submit strategy: "
+                                    '("default" "merge" "rebase" "fast-forward")
+                                    nil t nil nil "default")))
+     (list (unless (equal strategy "default") strategy))))
+  (let* ((pr (git-appraise-db-get-pullreq))
+         (root (or (and pr (slot-boundp pr 'owner) (oref pr owner))
+                   (git-appraise-backend--root)))
+         (revision (and pr (slot-boundp pr 'number) (oref pr number))))
+    (unless (and root revision)
+      (user-error "No current review to land"))
+    (unless (yes-or-no-p (format "Land current review %s%s? "
+                                 revision
+                                 (if strategy (format " (%s)" strategy) "")))
+      (user-error "Land cancelled"))
+    (message "Landing review %s..." revision)
+    (git-appraise-backend-land-review root revision strategy)
+    (when (get-buffer (git-appraise-pr-buffer-name))
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise-reload)))
+    (message "Review landed")))
 
 ;;;###autoload
 (defun git-appraise-reload ()

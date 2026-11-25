@@ -122,6 +122,7 @@ offers local reviews instead of prompting for a URL."
    ["Manage"
     ("a" "Abandon" git-appraise-abandon-review)
     ("b" "Rebase" git-appraise-rebase-review)
+    ("l" "Land review" git-appraise-land-review)
     ("p" "Push" git-appraise-push-notes)
     ("P" "Pull" git-appraise-pull-notes)]])
 
@@ -163,6 +164,7 @@ offers local reviews instead of prompting for a URL."
    ["Manage"
     ("A" "Abandon" git-appraise-abandon-current-review)
     ("b" "Rebase" git-appraise-rebase-current-review)
+    ("L" "Land review" git-appraise-land-current-review)
     ("p" "Push" git-appraise-push-notes)
     ("P" "Pull" git-appraise-pull-notes)]])
 

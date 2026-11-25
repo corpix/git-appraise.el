@@ -70,6 +70,7 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `r s c` | Send a general comment |
 | Review buffer | `r A` | Abandon the current review |
 | Review buffer | `r b` | Rebase the current review onto its target |
+| Review buffer | `r L` | Land the current review into its target |
 | Review buffer | `r p` / `r P` | Push or pull git-appraise notes |
 
 Drafted inline comments survive a reload while the review head is unchanged.

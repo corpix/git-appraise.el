@@ -774,5 +774,39 @@ REMOTE defaults to \"origin\"."
     (git-appraise-backend-rebase root revision)
     (message "Review rebased: %s" revision)))
 
+(defun git-appraise-backend-land-review (directory &optional revision strategy)
+  "Land git-appraise REVIEW REVISION in DIRECTORY.
+STRATEGY may be nil, \"merge\", \"rebase\", or \"fast-forward\"."
+  (let ((process-environment
+         (append '("GIT_SEQUENCE_EDITOR=true" "GIT_EDITOR=true")
+                 process-environment))
+        (args (append '("submit")
+                      (pcase strategy
+                        ("merge" '("--merge"))
+                        ("rebase" '("--rebase"))
+                        ("fast-forward" '("--fast-forward"))
+                        ((or 'nil "") nil)
+                        (_ (user-error "Unknown submit strategy: %s" strategy)))
+                      (when revision (list revision)))))
+    (apply #'git-appraise-backend--run directory args)))
+
+;;;###autoload
+(defun git-appraise-land-review (revision strategy)
+  "Land git-appraise REVISION in the current repository using STRATEGY."
+  (interactive
+   (let ((rev (git-appraise-backend-select-review))
+         (strategy (completing-read "Submit strategy: "
+                                    '("default" "merge" "rebase" "fast-forward")
+                                    nil t nil nil "default")))
+     (list rev (unless (equal strategy "default") strategy))))
+  (unless (yes-or-no-p (format "Land review %s%s? "
+                               revision
+                               (if strategy (format " (%s)" strategy) "")))
+    (user-error "Land cancelled"))
+  (let ((root (git-appraise-backend--root)))
+    (message "Landing review %s..." revision)
+    (git-appraise-backend-land-review root revision strategy)
+    (message "Review landed: %s" revision)))
+
 (provide 'git-appraise-backend)
 ;;; git-appraise-backend.el ends here
