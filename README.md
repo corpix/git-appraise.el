@@ -58,6 +58,8 @@ Press `r` for the command menu. The main actions are:
 | Existing comment | `RET` | Reply |
 | Draft comment | `RET` | Edit the draft |
 | Draft comment | `C-c C-k` | Delete the draft |
+| Draft comment | `C-c C-f` | Mark or unmark the draft as FYI |
+| Published comment | `C-c C-r` | Reply and mark the finding addressed |
 | Comment editor | `C-c C-c` | Save or send the comment |
 | Comment editor | `C-c C-k` | Cancel editing |
 | Review buffer | `C-c C-n` / `C-c C-p` | Move between diff hunks |
@@ -65,7 +67,8 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `v` | Toggle the viewed mark on the hunk at point, or the file on a file heading |
 | Review buffer | `V` | Toggle the viewed mark on the whole file |
 | Review buffer | `G` | Reload the review |
-| Review buffer | `r a` / `r r` / `r c` | Accept, reject, or submit comments |
+| Review buffer | `r a` / `r r` / `r c` | Accept, send needs-work findings, or send FYI comments |
+| Review buffer | `r R` | Explicitly reject the review |
 | Review buffer | `r l` | Accept with the configured LGTM message |
 | Review buffer | `r s c` | Send a general comment |
 | Review buffer | `r A` | Abandon the current review |
@@ -73,9 +76,11 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `r L` | Land the current review into its target |
 | Review buffer | `r p` / `r P` | Push or pull git-appraise notes |
 
-Drafted inline comments survive a reload while the review head is unchanged.
-If the head changed, reload asks before discarding them. A rejection needs
-feedback; the command prompts for it when needed. The CLI cannot place a new
+Drafts survive reloads and new commits on the reviewed branch. If the head
+changed, an old inline location must be checked before sending; the draft is
+kept for re-anchoring. `r r` marks staged comments needs-work unless a draft is
+marked FYI; with no actionable draft it asks for a needs-work summary. A
+rejection needs feedback. The CLI cannot place a new
 inline comment on a removed line because that line is absent from the review
 head file. Use a file or general comment for that case.
 

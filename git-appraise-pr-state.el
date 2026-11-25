@@ -3,9 +3,8 @@
 ;;; Commentary:
 ;; Durable storage for local, unsent review state (feedback and draft
 ;; comments/replies).  Persisted as JSONL snapshot events in a personal
-;; git notes ref, keyed by a deterministic blob anchor derived from the
-;; review identity.  This is the DB for local review state: in-memory
-;; objects are caches.
+;; git notes ref, keyed by the native review revision.  Legacy synthetic
+;; anchors are read for migration.  In-memory objects are caches.
 
 ;;; Code:
 
@@ -30,7 +29,7 @@ JSONL snapshot events."
   :group 'git-appraise
   :type 'string)
 
-(defconst git-appraise-pr-state-version 1
+(defconst git-appraise-pr-state-version 2
   "Envelope version for pr-state records.")
 
 (defun git-appraise-pr-state--repo (pr)
@@ -59,11 +58,9 @@ JSONL snapshot events."
           (or (and (slot-boundp pr 'number) (oref pr number)) "")))
 
 (defun git-appraise-pr-state--anchor (repo pr)
-  "Return a git object sha used as the notes anchor for PR in REPO.
-Uses a deterministic blob derived from PR identity so the anchor is
-stable across head changes and restarts."
+  "Return the legacy v1 synthetic notes anchor for PR in REPO."
   (let* ((key (format "git-appraise-pr-state:v%d:%s"
-                      git-appraise-pr-state-version
+                      1
                       (git-appraise-pr-state--identity pr)))
          (tmp (make-temp-file "git-appraise-pr-state-")))
     (unwind-protect
@@ -76,6 +73,14 @@ stable across head changes and restarts."
                 (string-trim stdout)
               (error "git hash-object failed: %s" (string-trim stderr)))))
       (ignore-errors (delete-file tmp)))))
+
+(defun git-appraise-pr-state--current-anchor (repo pr)
+  "Use PR's review revision as the notes anchor when it is a commit."
+  (let ((revision (and (slot-boundp pr 'number) (oref pr number))))
+    (if (and (stringp revision)
+             (string-match-p "\\`[0-9a-f]\\{40\\}\\'" revision))
+        revision
+      (git-appraise-pr-state--anchor repo pr))))
 
 (defun git-appraise-pr-state--strip-text-props (obj)
   "Return OBJ with text properties stripped from all strings."
@@ -113,8 +118,7 @@ stable across head changes and restarts."
   (cond
    ((not (and (listp obj) (a-get obj 'type)))
     (cons nil "not a JSON object"))
-   ((not (and (numberp (a-get obj 'v))
-              (= (a-get obj 'v) git-appraise-pr-state-version)))
+   ((not (member (a-get obj 'v) '(1 2)))
     (cons nil (format "unsupported version %S" (a-get obj 'v))))
    ((not (equal (a-get obj 'type) "pr-state"))
     (cons nil (format "unknown type %S" (a-get obj 'type))))
@@ -126,11 +130,12 @@ stable across head changes and restarts."
     (cons nil "missing pr identity"))
    (t (cons t nil))))
 
-(defun git-appraise-pr-state--read (repo pr)
-  "Read latest valid pr-state snapshot for PR in REPO.
+(defun git-appraise-pr-state--read-at (repo pr anchor)
+  "Read latest valid pr-state snapshot for PR at ANCHOR in REPO.
 Return the snapshot alist, or nil when no valid state exists."
   (condition-case err
-      (let* ((anchor (git-appraise-pr-state--anchor repo pr))
+      (let* ((actor (git-appraise-pr-state--actor repo))
+             (identity (git-appraise-pr-state--identity pr))
              (res (git-appraise-metadata--git
                    repo (list "notes" (concat "--ref=" git-appraise-pr-state-notes-ref)
                               "show" anchor))))
@@ -146,7 +151,9 @@ Return the snapshot alist, or nil when no valid state exists."
                                       (json-false :json-false))
                                   (goto-char (point-min))
                                   (json-read)))))
-                     (when (car (git-appraise-pr-state--valid-p obj))
+                     (when (and (car (git-appraise-pr-state--valid-p obj))
+                                (equal (a-get obj 'actor) actor)
+                                (equal (a-get obj 'pr) identity))
                        (when (or (not latest)
                                  (string< (a-get latest 'at) (a-get obj 'at))
                                  (and (equal (a-get latest 'at) (a-get obj 'at))
@@ -162,6 +169,13 @@ Return the snapshot alist, or nil when no valid state exists."
     (error
      (message "pr-state read failed: %s" (error-message-string err))
      nil)))
+
+(defun git-appraise-pr-state--read (repo pr)
+  "Read current draft snapshot, falling back to legacy v1 notes."
+  (or (git-appraise-pr-state--read-at
+       repo pr (git-appraise-pr-state--current-anchor repo pr))
+      (git-appraise-pr-state--read-at
+       repo pr (git-appraise-pr-state--anchor repo pr))))
 
 (defun git-appraise-pr-state--actor (repo)
   "Return git user.email for REPO, or nil."
@@ -181,7 +195,7 @@ reported as messages unless SIGNAL-ERRORS is non-nil."
           (error "Cannot save draft: review repository is unavailable"))
         (when (and repo (eieio-object-p pr))
           (let ((actor (git-appraise-pr-state--actor repo))
-                (anchor (git-appraise-pr-state--anchor repo pr)))
+                (anchor (git-appraise-pr-state--current-anchor repo pr)))
             (when (and signal-errors (not actor))
               (error "Cannot save draft: git user.email is unavailable"))
             (when actor

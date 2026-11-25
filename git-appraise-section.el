@@ -19,7 +19,6 @@
 (require 'git-appraise-repo)
 (require 'git-appraise-diff)
 (require 'git-appraise-backend)
-(require 'git-appraise-interfaces)
 (require 'git-appraise-viewed)
 
 (declare-function git-appraise--diff--classify-diff "git-appraise-diff")

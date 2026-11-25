@@ -21,6 +21,7 @@
                   (section))
 (declare-function git-appraise-backend-refresh-comments "git-appraise-backend"
                   (obj))
+(declare-function git-appraise-backend-send-code-comment "git-appraise-backend")
 (declare-function git-appraise-lazy--expand-at "git-appraise-lazy"
                   (section))
 (declare-function git-appraise-lazy-placeholder-section-p "git-appraise-lazy"
@@ -248,40 +249,6 @@ Return non-nil on success."
               (slot-boundp v 'id)
               (equal (oref v id) id)))))))
 
-(defun git-appraise-comment--update-remote-comment-in-place (buff-name comment-id new-body)
-  "Update remote comment COMMENT-ID in BUFF-NAME with NEW-BODY, in place.
-Return non-nil when the rendered section was updated."
-  (let* ((buf (get-buffer buff-name))
-         (section (and buf (git-appraise-comment--find-section-by-id buff-name comment-id))))
-    (when (and section (buffer-live-p buf))
-      (with-current-buffer buf
-          (let* ((v (oref section value))
-                 (raw-type (oref section type))
-                 (type (if (eq (car-safe raw-type) 'quote) (cadr raw-type) raw-type))
-                 (hunk (git-appraise-comment--hunk-ancestor section)))
-            (when (and (eieio-object-p v)
-                       (memq type '(git-appraise-code-comment-section
-                                    git-appraise-outdated-comment-section))
-                       hunk)
-            (when (slot-exists-p v 'msg) (oset v msg new-body))
-            (when (slot-exists-p v 'body) (oset v body new-body))
-            (let ((inhibit-read-only t)
-                  (start (copy-marker (oref section start)))
-                  (end (copy-marker (oref section end) t))
-                  (parent (oref section parent)))
-              (save-excursion
-                (goto-char start)
-                (set-marker-insertion-type start nil)
-                (set-marker-insertion-type end t)
-                (when parent
-                  (oset parent children (delq section (oref parent children))))
-                (delete-region start end)
-                (goto-char start)
-                (git-appraise-comment--insert-obj-in-hunk hunk v start)
-                (set-marker start nil)
-                (set-marker end nil)
-                t))))))))
-
 (defun git-appraise-comment--insert-reply-in-place (obj buff-name)
   "Insert reply OBJ into BUFF-NAME after its parent comment section.
 Return non-nil on success."
@@ -421,6 +388,7 @@ be found, so callers can rebuild."
                                           (outdated)
                                           (reply?)
                                           (line-type . ,(oref obj line-type))
+                                          (fyi . ,(oref obj fyi?))
                                           (local? . t)))))))
 
     (when (string-empty-p clean-msg)
@@ -450,7 +418,7 @@ be found, so callers can rebuild."
                     (let ((git-appraise-section-full-refresh? nil))
                       (git-appraise--build-buffer buff-name)))
                   (git-appraise-comment--goto-saved-comment obj buff-name))))
-            (git-appraise-new-code-comment
+            (git-appraise-backend-send-code-comment
              (git-appraise-db-get-pullreq)
              obj
              (lambda (&rest _)

@@ -8,6 +8,7 @@
 ;;; Code:
 
 (require 'git-appraise-comment)
+(require 'git-appraise-backend)
 (require 'git-appraise-db)
 (require 'git-appraise-diff)
 (require 'git-appraise-utils)
@@ -18,6 +19,9 @@
 (declare-function git-appraise-backend-rebase "git-appraise-backend")
 (declare-function git-appraise-backend-land-review "git-appraise-backend")
 (declare-function git-appraise-backend--root "git-appraise-backend")
+(declare-function git-appraise-backend-send-reply "git-appraise-backend")
+(declare-function git-appraise-comment--find-section-by-internal-id
+                  "git-appraise-comment-draft")
 
 (defcustom git-appraise-lgtm-message "LGTM! :thumbsup:"
   "Message to add to fast track LGTM git-appraise."
@@ -69,6 +73,69 @@
     (message "Draft comment deleted")))
 
 ;;;###autoload
+(defun git-appraise-toggle-draft-fyi ()
+  "Toggle the FYI exception for the local draft at point.
+Needs-work submissions mark other staged findings actionable."
+  (interactive)
+  (let* ((section (magit-current-section))
+         (value (and section (oref section value)))
+         (id (and (git-appraise-local-comment-section-p section)
+                  (eieio-object-p value) (oref value internalId)))
+         (pr (git-appraise-db-get-pullreq)))
+    (unless id
+      (user-error "No local draft comment at point"))
+    (let* ((entry (--first
+                   (--any? (equal (a-get it 'internal-id) id)
+                           (a-get-in it '(comments nodes)))
+                   (oref pr raw-comments)))
+           (copy (and entry (copy-tree entry)))
+           (node (and copy (car (a-get-in copy '(comments nodes))))))
+      (unless node
+        (user-error "Draft is no longer in local state"))
+      (let ((fyi (not (a-get node 'fyi))))
+        (setq copy (a-assoc-in copy '(comments nodes)
+                               (list (a-assoc node 'fyi fyi))))
+        (git-appraise-db--upsert-local-comment copy id)
+        (oset value fyi? fyi))
+      (when-let* ((outer
+                   (git-appraise-comment--find-section-by-internal-id
+                    (git-appraise-pr-buffer-name pr) id)))
+        (let ((inhibit-read-only t))
+          (save-excursion
+            (goto-char (oref outer start))
+            (let ((end (line-end-position)))
+              (when (search-forward " · DRAFT" end t)
+                (if (oref value fyi?)
+                    (insert (propertize " · FYI"
+                                        'face 'git-appraise-state-face))
+                  (when (search-forward " · FYI" (line-end-position) t)
+                    (delete-region (- (point) (length " · FYI"))
+                                   (point)))))))))
+      (message "Draft is %s" (if (oref value fyi?) "FYI" "actionable")))))
+
+;;;###autoload
+(defun git-appraise-resolve-comment-at-point (message)
+  "Reply to the published comment at point and mark it addressed.
+MESSAGE explains the resolution; this writes one native `-lgtm' reply."
+  (interactive (list (read-string "Resolution reply: ")))
+  (let* ((section (magit-current-section))
+         (value (and section (oref section value)))
+         (id (and (eieio-object-p value)
+                  (slot-exists-p value 'id)
+                  (slot-boundp value 'id)
+                  (oref value id)))
+         (pr (git-appraise-db-get-pullreq)))
+    (unless (and (git-appraise-backend-repo-p pr)
+                 (stringp id) (not (string-empty-p id)))
+      (user-error "No published git-appraise comment at point"))
+    (when (string-empty-p (string-trim message))
+      (user-error "A resolution reply is required"))
+    (git-appraise-backend-send-reply pr id message t)
+    (let ((git-appraise-section-full-refresh? nil))
+      (git-appraise--build-buffer (git-appraise-pr-buffer-name pr)))
+    (message "Resolution reply saved locally; push notes to share it")))
+
+;;;###autoload
 (defun git-appraise-delete-feedback ()
   "Clear the unsent review feedback."
   (interactive)
@@ -105,28 +172,14 @@
    (start-line :initarg :start-line)
    (body       :initarg :body)
    (internal-id :initarg :internal-id)
-   (line-type  :initarg :line-type)))
-
-(defclass git-appraise-submit-review ()
-  ((state :initform nil)
-   (pr :initform nil)
-   (local-comments :initform nil
-                   :type (satisfies
-                          (lambda (it)
-                            (-all-p #'git-appraise-submit-local-comment-p it))))
-   (feedback :initform nil)))
+   (line-type  :initarg :line-type)
+   (fyi        :initarg :fyi :initform nil)))
 
 (defclass git-appraise-submit-reply ()
   ((reply-to-id :initarg :reply-to-id)
    (body        :initarg :body)
-   (internal-id :initarg :internal-id)))
-
-(defclass git-appraise-submit-replies ()
-  ((pr      :initform nil)
-   (replies :initform nil
-            :type (satisfies
-                   (lambda (it)
-                     (-all-p #'git-appraise-submit-reply-p it))))))
+   (internal-id :initarg :internal-id)
+   (resolve     :initarg :resolve :initform nil)))
 
 (defun git-appraise-submit--unique? (previous-obj current-id)
   "Verify if PREVIOUS-OBJ has CURRENT-ID."
@@ -141,8 +194,11 @@
   (and (not (oref review-obj feedback))
        (not (string-equal (oref review-obj state) "APPROVE"))
        (not (and (git-appraise-backend-repo-p (oref review-obj pr))
-                 (string-equal (oref review-obj state) "COMMENT")
-                 (oref review-obj local-comments)))))
+                 (member (oref review-obj state) '("COMMENT" "NEEDS_WORK"))
+                 (if (equal (oref review-obj state) "NEEDS_WORK")
+                     (--any? (not (oref it fyi))
+                             (oref review-obj local-comments))
+                   (oref review-obj local-comments))))))
 
 ;;;###autoload
 (defun git-appraise-set-feedback ()
@@ -173,8 +229,8 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
   (let* ((pr (git-appraise-db-get-pullreq))
          (buff-name (git-appraise-pr-buffer-name pr))
          (pr-id (oref pr id))
-         (review-obj (git-appraise-submit-appraise-review))
-         (replies-obj (git-appraise-submit-appraise-replies)))
+         (review-obj (git-appraise-native-publication))
+         (replies-obj (git-appraise-native-replies)))
     (oset review-obj state event)
     (oset review-obj pr pr)
     (oset replies-obj pr pr)
@@ -197,7 +253,9 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
                      (push (git-appraise-submit-reply
                             :reply-to-id (oref value id)
                             :body (oref value msg)
-                            :internal-id (oref value internalId))
+                            :internal-id (oref value internalId)
+                            :resolve (and (slot-boundp value 'resolve?)
+                                          (oref value resolve?)))
                            replies)))
                  (when (git-appraise-local-comment-section-p section)
                    (when (git-appraise-submit--unique? local-comments (oref value internalId))
@@ -210,7 +268,9 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
                             :start-line (ignore-errors (oref value start-line))
                             :body (oref value msg)
                             :internal-id (oref value internalId)
-                            :line-type (oref value line-type))
+                            :line-type (oref value line-type)
+                            :fyi (and (slot-boundp value 'fyi?)
+                                      (oref value fyi?)))
                            local-comments))))
                (forward-line)))))
       (oset replies-obj replies replies)
@@ -221,33 +281,27 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
             (setq git-appraise-comment-pending-submit-event event)
             (message "Provide review feedback to submit this review.")
             (git-appraise-set-feedback))
-        (progn
-          (when (not only-reply?)
-            (git-appraise-send-review
-             review-obj
-             (lambda (&rest _)
-               (oset pr finished t)
-               (oset pr finished-at (current-time-string))
-               (oset pr feedback nil)
-               (git-appraise-db-update pr)
-               (when (fboundp 'git-appraise-pr-state-persist)
-                 (git-appraise-pr-state-persist pr))
-               (if (get-buffer buff-name)
-                   (message "Done submitting review (%d comment(s) marked sent)"
-                            (git-appraise-section--mark-local-comments-sent
-                             buff-name))
-                 (setq git-appraise-db--pullreq-id pr-id)
-                 (git-appraise--build-buffer buff-name nil "Done submitting review")))))
-          (when (oref replies-obj replies)
-            (git-appraise-send-replies
-             replies-obj
-             (lambda (&rest _)
-               (if (get-buffer buff-name)
-                   (message "Done submitting review and replies (%d comment(s) marked sent)"
-                            (git-appraise-section--mark-local-comments-sent
-                             buff-name))
-                 (setq git-appraise-db--pullreq-id pr-id)
-                 (git-appraise--build-buffer buff-name nil "Done submitting review and replies")))))))))))
+        (condition-case err
+            (progn
+              ;; Every successful reply is removed from the draft store by
+              ;; the backend.  Send the verdict last so retry after a
+              ;; partial failure cannot append the same decision twice.
+              (when (oref replies-obj replies)
+                (git-appraise-backend-publish-replies replies-obj #'ignore))
+              (unless only-reply?
+                (git-appraise-backend-publish-review review-obj #'ignore)
+                (oset pr feedback nil)
+                (git-appraise-db-update pr)
+                (git-appraise-pr-state-persist pr))
+              (setq git-appraise-db--pullreq-id pr-id)
+              (git-appraise--build-buffer buff-name nil
+                                          "Review events saved locally; push notes to share")
+              (message "Review events saved locally; push notes to share"))
+          (error
+           (setq git-appraise-db--pullreq-id pr-id)
+           (let ((git-appraise-section-full-refresh? nil))
+             (ignore-errors (git-appraise--build-buffer buff-name)))
+           (signal (car err) (cdr err)))))))))
 
 ;;;###autoload
 (defun git-appraise-submit-approve (&optional feedback)
@@ -262,8 +316,17 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
   (git-appraise--submit "COMMENT"))
 
 ;;;###autoload
-(defun git-appraise-submit-request-changes ()
-  "Submit a Request Change for the current PR."
+(defun git-appraise-submit-needs-work ()
+  "Publish staged findings as needs-work comments."
+  (interactive)
+  (git-appraise--submit "NEEDS_WORK"))
+
+(defalias 'git-appraise-submit-request-changes
+  #'git-appraise-submit-needs-work)
+
+;;;###autoload
+(defun git-appraise-submit-reject ()
+  "Explicitly reject the current git-appraise review."
   (interactive)
   (git-appraise--submit "REQUEST_CHANGES"))
 

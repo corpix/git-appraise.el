@@ -29,6 +29,8 @@
 (require 'git-appraise-section)
 (require 'git-appraise-utils)
 (require 'markdown-mode)
+(declare-function git-appraise-backend-update-request "git-appraise-backend")
+(declare-function git-appraise-backend-send-general-comment "git-appraise-backend")
 (defvar git-appraise-repo-worktree)             ; git-appraise-repo.el
 
 (defcustom git-appraise-comment-buffer-name "*Git Appraise Comment*"
@@ -48,12 +50,6 @@
 
 (defcustom git-appraise-comment-single-comment-msg ";;; Equivalent to add a simple comment to the PR without a review."
   "Default text to single comment section e.g. conversation."
-  :group 'git-appraise
-  :type 'string)
-
-(defcustom git-appraise-comment-edit-remote-msg ";;; Editing a submitted comment\n;;; C-c C-c to send the edit, C-c C-k to abort"
-  "Helper text on top of the comment buffer when editing a
-comment that was already submitted."
   :group 'git-appraise
   :type 'string)
 
@@ -153,9 +149,7 @@ For internal usage only.")
                              (and (boundp 'git-appraise-comment-feedback-msg)
                                   git-appraise-comment-feedback-msg)
                              (and (boundp 'git-appraise-comment-single-comment-msg)
-                                  git-appraise-comment-single-comment-msg)
-                             (and (boundp 'git-appraise-comment-edit-remote-msg)
-                                  git-appraise-comment-edit-remote-msg)))))
+                                  git-appraise-comment-single-comment-msg)))))
     (dolist (helper helpers)
       (setq msg (git-appraise-utils--comment-clean-msg msg helper)))
     msg))
@@ -277,104 +271,10 @@ Optionally define a MSG."
 
 ;;; Editing comments that were already submitted
 
-(defclass git-appraise-editable-remote-comment ()
-  ((kind :initarg :kind
-         :documentation "Which endpoint the edit goes to:
-\"issue-comment\", \"review-summary\" or \"review-comment\"
-\(see `git-appraise-update-comment').")
-   (id   :initarg :id
-         :documentation "Backend databaseId of the comment/review.")
-   (body :initarg :body
-         :documentation "Original raw (markdown) body, for reference.")
-   (msg  :initform nil
-         :documentation "Holds the NEW body once the comment
-buffer is committed (the commit machinery osets this slot).")))
-
-(defun git-appraise-comment--raw-body (obj)
-  "Return the raw (markdown) body stored on comment OBJ, or nil.
-Guards both the slot not existing (objects rendered before a
-reload by the long-lived daemon) and it being unbound."
-  (and (slot-exists-p obj 'body)
-       (slot-boundp obj 'body)
-       (oref obj body)))
-
-(defun git-appraise-comment--edit-target (value)
-  "Return the edit KIND for the comment data object VALUE, or nil.
-`local' for local (pending) comments, one of \"issue-comment\",
-\"review-summary\" or \"review-comment\" for submitted ones, nil
-when VALUE is not an editable comment.  Exact-class predicates
-decide (eieio `-p' predicates are NOT subclass-aware on every
-Emacs this package supports), and the `local?' SLOT is never
-consulted: `git-appraise-outdated-comment-section' sets it to t
-even for comments fetched from the backend."
-  (cond
-   ((git-appraise-comment-section-p value)
-    (pcase (and (slot-boundp value 'typename) (oref value typename))
-      ("IssueComment" "issue-comment")
-      ("PullRequestReview" "review-summary")
-      (_ nil)))
-   ;; local (pending) comments and replies keep their RET flow
-   ((or (git-appraise-local-comment-section-p value)
-        (git-appraise-reply-comment-section-p value))
-    'local)
-   ;; diff-anchored comments fetched from the backend
-   ((or (git-appraise-code-comment-section-p value)
-        (git-appraise-outdated-comment-section-p value))
-    "review-comment")
-   (t
-    nil)))
-
-(defun git-appraise-comment--start-remote-edit (value kind)
-  "Open the comment buffer to edit the submitted comment VALUE.
-KIND selects the provider endpoint (see
-`git-appraise-update-comment')."
-  (let* ((pr (git-appraise-db-get-pullreq))
-         (id (and (slot-exists-p value 'id)
-                  (slot-boundp value 'id)
-                  (oref value id)))
-         (body (git-appraise-comment--raw-body value))
-         (author (and (slot-boundp value 'author) (oref value author)))
-         (user (git-appraise-utils--git-get-user)))
-    (when (git-appraise-backend-repo-p pr)
-      (user-error "Editing submitted comments is not supported in git-appraise"))
-    (unless id
-      (user-error "Comment has no backend id; nothing to edit"))
-    (unless body
-      (user-error "Raw comment body unavailable: press G to fully reload the review, then try again"))
-    (when (and author user
-               (not (string-equal (downcase author) (downcase user)))
-               (not (y-or-n-p (format "This comment was authored by @%s.  Edit it anyway? "
-                                      author))))
-      (user-error "Edit aborted"))
-    (setq git-appraise-comment-cursor-pos (point)
-          git-appraise-comment-uncommitted
-          (git-appraise-editable-remote-comment
-           :kind kind :id id :body body))
-    (git-appraise-comment-add
-     (format "%s\n\n%s" git-appraise-comment-edit-remote-msg body))))
-
-;;;###autoload
 (defun git-appraise-edit-remote-comment-at-point ()
-  "Edit a comment that was already submitted.
-Works on diff comments (including outdated ones) and on
-Conversation comments; a \"PullRequestReview\" conversation
-entry edits the submitted review summary.  The edit is sent when
-you press \\<git-appraise-comment-mode-map>\\[git-appraise-comment-commit] in the comment buffer, and the
-review re-fetches its data afterward.  The backend rejects edits to
-other people's comments."
+  "Explain why a published git-appraise comment cannot be edited."
   (interactive)
-  (when (git-appraise-db-local-pr-p)
-    (user-error "Local diff reviews are read-only"))
-  (let* ((section (magit-current-section))
-         (value (and section
-                     (slot-boundp section 'value)
-                     (oref section value))))
-    (if-let ((kind (and value (git-appraise-comment--edit-target value))))
-        (if (eq kind 'local)
-            ;; pending local comments/replies keep their RET flow
-            (git-appraise-comment-add-or-edit)
-          (git-appraise-comment--start-remote-edit value kind))
-      (user-error "No editable comment at point"))))
+  (user-error "Published git-appraise comments are append-only; add a reply instead"))
 
 (cl-defmethod git-appraise-comment-handler-add-or-edit (obj)
   "Add a comment in the OBJ."
@@ -388,7 +288,7 @@ other people's comments."
                         :path (string-remove-prefix "b/" (substring-no-properties obj))
                         :position 0
                         :line-type "FILE"
-                        :send? t)))
+                        :send? nil)))
           (setq git-appraise-comment-uncommitted comment)
           (git-appraise-comment-add))
       (if (not (equal type 'hunk))
@@ -434,9 +334,7 @@ other people's comments."
                                :start-side start-side
                                :start-line start-line
                                :line-type line-type
-                               :send? (or git-appraise-comment-send?
-                                          (git-appraise-backend-repo-p
-                                           (git-appraise-db-get-pullreq))))))
+                               :send? git-appraise-comment-send?)))
           (setq git-appraise-comment-uncommitted local-comment)
           (git-appraise-comment-add)))))))
 
@@ -455,53 +353,6 @@ other people's comments."
 
 (require 'git-appraise-comment-draft)
 
-(cl-defmethod git-appraise-comment-handler-commit ((obj git-appraise-editable-remote-comment) _default-buff-msg)
-  "Send the edit of an already-submitted comment OBJ to the backend.
-The new body is the `msg' slot the commit machinery sets from the
-comment buffer; the helper header is stripped first."
-  (let* ((pr (git-appraise-db-get-pullreq))
-         (pr-id (oref pr id))
-         (buff-name (git-appraise-pr-buffer-name pr))
-         (kind (oref obj kind))
-         (comment-id (oref obj id))
-         (new-body (git-appraise-utils--comment-clean-msg
-                    (oref obj msg)
-                    git-appraise-comment-edit-remote-msg)))
-    (if (string-empty-p new-body)
-        (user-error "Comment is empty")
-      (git-appraise-update-comment
-       pr kind comment-id new-body
-       (lambda (&rest _)
-         (setq git-appraise-db--pullreq-id pr-id)
-         (let* ((buf (get-buffer buff-name))
-                (cursor-pos (or (and buf (window-live-p (get-buffer-window buf))
-                                     (window-point (get-buffer-window buf)))
-                                (and buf (with-current-buffer buf (point))))))
-           (pcase (git-appraise-backend-refresh-comments (git-appraise-db-get-pullreq))
-             ('ok
-              (let ((patched (and (buffer-live-p buf)
-                                  (if (member kind '("issue-comment" "review-summary"))
-                                      (git-appraise-comment--refresh-conversation-in-place
-                                       buff-name)
-                                    (git-appraise-comment--update-remote-comment-in-place
-                                     buff-name comment-id new-body)))))
-                (unless patched
-                  (let ((git-appraise-section-full-refresh? nil)
-                        (git-appraise-comment-cursor-pos cursor-pos))
-                    (git-appraise--build-buffer buff-name))))
-              (message "Comment edited"))
-             ('head-changed
-              (let ((git-appraise-section-full-refresh? t)
-                    (git-appraise-comment-cursor-pos cursor-pos))
-                (git-appraise--build-buffer buff-name))
-              (message "Comment edited"))
-             (_
-              (let ((git-appraise-section-full-refresh? nil)
-                    (git-appraise-comment-cursor-pos cursor-pos))
-                (when (buffer-live-p buf)
-                  (git-appraise--build-buffer buff-name)))
-              (message "Comment edited; refresh failed")))))))))
-
 (defun git-appraise-comment--refresh (pr)
   "Refresh PR without depending on the current review's global context."
   (let ((git-appraise-db--pullreq-id (oref pr id)))
@@ -511,23 +362,19 @@ comment buffer; the helper header is stripped first."
   "Dispatch COMMENT-TEXT for PR while the composer remains available."
   (cond
    (git-appraise-comment-description?
-    (oset pr raw-infos (-> (oref pr raw-infos)
-                          (a-assoc 'bodyText comment-text)
-                          (a-assoc 'bodyHTML nil)))
-    (git-appraise-send-description
-     pr
-     (lambda ()
-       (git-appraise-db-update pr)
-       (git-appraise-comment--refresh pr)
-       (git-appraise-comment-reset-global-vars))))
+    (git-appraise-backend-update-request pr comment-text)
+    (git-appraise-comment--refresh pr)
+    (git-appraise-comment-reset-global-vars))
    (git-appraise-comment-title?
-    (oset pr title comment-text)
-    (git-appraise-send-title
-     pr
-     (lambda ()
-       (git-appraise-db-update pr)
-       (git-appraise-comment--refresh pr)
-       (git-appraise-comment-reset-global-vars))))
+    (when (string-empty-p comment-text)
+      (user-error "Review title is empty"))
+    (let* ((old (or (a-get (oref pr raw-infos) 'bodyText) ""))
+           (newline (string-match "\n" old))
+           (message (concat comment-text
+                            (if newline (substring old newline) ""))))
+      (git-appraise-backend-update-request pr message)
+      (git-appraise-comment--refresh pr)
+      (git-appraise-comment-reset-global-vars)))
    (git-appraise-comment-feedback?
     (let* ((msg (git-appraise-utils--comment-clean-msg
                  comment-text git-appraise-comment-feedback-msg))
@@ -573,7 +420,7 @@ comment buffer; the helper header is stripped first."
                          (git-appraise-comment-reset-global-vars)))))
       (when (string-empty-p msg)
         (user-error "Comment is empty"))
-      (git-appraise-new-issue-comment pr msg callback)))
+      (git-appraise-backend-send-general-comment pr msg callback)))
    (t
     (oset git-appraise-comment-uncommitted msg comment-text)
     (git-appraise-comment-handler-commit
@@ -630,19 +477,6 @@ comment buffer; the helper header is stripped first."
 ;;; ----
 
 ;;;###autoload
-(defun git-appraise-input-mention-user-at-point ()
-  "Insert @USERNAME at current point to mention a user."
-  (interactive)
-  (let* ((pr (git-appraise-db-get-pullreq))
-         (users (ignore-errors (git-appraise-get-mentionable-users pr))))
-    (if (not users)
-        (user-error "No mentionable users found for this repository")
-      (let* ((logins (sort (-map (lambda (it) (a-get it 'login)) users)
-                           #'string-lessp))
-             (user (completing-read "Mention user: " logins nil nil)))
-        (insert "@" user " ")))))
-
-;;;###autoload
 (defun git-appraise-comment-quit ()
   "Quit the comment window."
   (interactive)
@@ -661,7 +495,6 @@ comment buffer; the helper header is stripped first."
   (let ((map (copy-keymap markdown-mode-map)))
     (define-key map (kbd "C-c C-c") 'git-appraise-comment-commit)
     (define-key map (kbd "C-c C-k") 'git-appraise-comment-quit)
-    (define-key map (kbd "C-c @") 'git-appraise-input-mention-user-at-point)
     (set-keymap-parent map markdown-mode-map)
     map))
 

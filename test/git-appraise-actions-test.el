@@ -76,6 +76,73 @@
              (a-get (git-appraise-actions-test--show directory revision)
                     'comments)))))
 
+;;; req-2026-11-25-060: mixed findings can be marked FYI
+;; covers: git-appraise-actions.el git-appraise-section-comment.el
+;; covers-fn: git-appraise-toggle-draft-fyi
+;; enforcement: test
+(ert-deftest git-appraise-actions/req-2026-11-25-060-toggle-draft-fyi ()
+  "WHEN a reviewer marks a draft FYI THE SYSTEM SHALL preserve that choice for a needs-work submission."
+  (git-appraise-actions-test-with-repo
+    (git-appraise-actions-test--open-and-render revision)
+    (git-appraise-db--pullreq-raw-comments-update
+     '((author (login . "Tester"))
+       (state . "LOCAL COMMENT")
+       (comments (nodes ((internal-id . "fyi-draft")
+                         (bodyText . "Context only")
+                         (path . "example.txt")
+                         (position . 3)
+                         (line-type . "ADDED")
+                         (local? . t))))))
+    (let ((git-appraise-section-full-refresh? nil))
+      (git-appraise--build-buffer))
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "Context only")
+      (execute-kbd-macro (kbd "C-c C-f")))
+    (should (a-get (car (a-get-in
+                         (car (git-appraise-db--pullreq-raw-comments))
+                         '(comments nodes))) 'fyi))))
+
+;;; req-2026-11-25-065: reviewer resolves a specific finding
+;; covers: git-appraise-actions.el git-appraise-backend.el
+;; covers-fn: git-appraise-resolve-comment-at-point
+;; enforcement: test
+(ert-deftest git-appraise-actions/req-2026-11-25-065-resolve-comment-at-point ()
+  "WHEN a reviewer resolves a published finding THE SYSTEM SHALL reply to that finding and mark it addressed."
+  (git-appraise-actions-test-with-repo
+    (git-appraise-test--run
+     directory "git-appraise" "comment" "-nmw" "-m" "Please fix" revision)
+    (git-appraise-actions-test--open-and-render revision)
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "Please")
+      (git-appraise-resolve-comment-at-point "Fixed in followup"))
+    (let* ((root (car (a-get (git-appraise-actions-test--show
+                               directory revision) 'comments)))
+           (child (car (a-get root 'children))))
+      (should (equal "Fixed in followup"
+                     (a-get-in child '(comment description))))
+      (should (eq t (a-get-in child '(comment resolved)))))))
+
+;;; req-2026-11-25-066: published comments remain append-only
+;; covers: git-appraise-comment.el
+;; covers-fn: git-appraise-edit-remote-comment-at-point
+;; enforcement: test
+(ert-deftest git-appraise-actions/req-2026-11-25-066-published-comment-is-immutable ()
+  "WHEN a reviewer tries to edit a published comment THE SYSTEM SHALL direct them to add a reply instead."
+  (git-appraise-actions-test-with-repo
+    (git-appraise-test--run
+     directory "git-appraise" "comment" "-m" "Published note" revision)
+    (git-appraise-actions-test--open-and-render revision)
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "Published")
+      (should-error (git-appraise-edit-remote-comment-at-point)
+                    :type 'user-error))
+    (should (= 1 (length (a-get (git-appraise-actions-test--show
+                                 directory revision) 'comments))))))
+
 ;;; req-2026-11-24-002: remove an unsent review comment
 ;; covers: git-appraise-actions.el git-appraise-section-comment.el
 ;; covers-fn: git-appraise-section-delete-comment
@@ -127,12 +194,12 @@
       (execute-kbd-macro (kbd "C-c C-k")))
     (should-not (oref (git-appraise-db-get-pullreq) feedback))))
 
-;;; req-2026-11-23-009: request-changes action submits rejection
+;;; req-2026-11-23-009: needs-work action publishes actionable feedback
 ;; covers: git-appraise-actions.el git-appraise-backend.el
 ;; covers-fn: git-appraise-submit-request-changes, git-appraise--submit
 ;; enforcement: test
 (ert-deftest git-appraise-actions/req-2026-11-23-009-request-changes-action ()
-  "WHEN a reviewer requests changes with feedback THE SYSTEM SHALL submit a rejection decision."
+  "WHEN a reviewer sends needs-work feedback THE SYSTEM SHALL publish an actionable review comment."
   (git-appraise-actions-test-with-repo
     (git-appraise-actions-test--open-and-render revision)
     (git-appraise-db--pullreq-feedback-update "Needs work")
@@ -143,7 +210,9 @@
       (git-appraise-submit-request-changes))
     (let ((native (git-appraise-actions-test--show directory revision)))
       (should (eq :false (a-get native 'resolved)))
-      (should (equal "REJECTED" (git-appraise-backend--state native))))))
+      (should (equal "Needs work"
+                     (a-get-in (car (a-get native 'comments))
+                               '(comment description)))))))
 
 ;;; req-2026-11-23-010: LGTM action approves with message
 ;; covers: git-appraise-actions.el
@@ -323,12 +392,12 @@
         (kill-buffer git-appraise-comment-buffer-name))
       (git-appraise-comment-reset-global-vars))))
 
-;;; req-2026-11-23-017: request-changes without feedback prompts and submits after feedback
+;;; req-2026-11-23-017: needs-work without findings prompts for feedback
 ;; covers: git-appraise-actions.el git-appraise-comment.el
 ;; covers-fn: git-appraise-submit-request-changes, git-appraise--submit, git-appraise-set-feedback
 ;; enforcement: test
 (ert-deftest git-appraise-actions/req-2026-11-23-017-request-changes-prompts-for-feedback ()
-  "WHEN a reviewer requests changes without feedback THE SYSTEM SHALL prompt for feedback and submit after it is provided."
+  "WHEN a reviewer sends needs-work feedback without findings THE SYSTEM SHALL ask for a summary and publish it."
   (git-appraise-actions-test-with-repo
     (git-appraise-actions-test--open-and-render revision)
     (unwind-protect
@@ -336,7 +405,7 @@
                    (lambda (buf &rest _) (set-buffer buf))))
           (with-current-buffer (git-appraise-pr-buffer-name)
             (git-appraise-submit-request-changes))
-          (should (equal "REQUEST_CHANGES" git-appraise-comment-pending-submit-event))
+          (should (equal "NEEDS_WORK" git-appraise-comment-pending-submit-event))
           (should (get-buffer git-appraise-comment-buffer-name))
           (with-current-buffer git-appraise-comment-buffer-name
             (erase-buffer)

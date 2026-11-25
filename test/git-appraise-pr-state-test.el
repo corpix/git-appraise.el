@@ -95,5 +95,32 @@
         (should-error (git-appraise-db--upsert-local-comment old "draft-1")))
       (should (equal (oref pr raw-comments) (list new))))))
 
+;;; req-2026-11-25-059: recover legacy drafts without publishing them
+;; covers: git-appraise-pr-state.el
+;; covers-fn: git-appraise-pr-state-hydrate, git-appraise-pr-state-persist
+;; enforcement: test
+(ert-deftest pr-state/req-2026-11-25-059-migrate-v1-draft ()
+  "WHEN a reviewer reopens legacy unsent feedback THE SYSTEM SHALL restore it privately and save new changes at the review anchor."
+  (git-appraise-test--with-review-repo "git-appraise-pr-state-migrate-"
+    (let* ((pr (git-appraise-backend-repo
+                :owner directory :repo "example" :number revision))
+           (actor (git-appraise-pr-state--actor directory))
+           (legacy (git-appraise-pr-state--snapshot pr actor))
+           (old-anchor (git-appraise-pr-state--anchor directory pr)))
+      (setf (alist-get 'v legacy) 1
+            (alist-get 'feedback legacy) "Old feedback")
+      (git-appraise-metadata-append
+       directory git-appraise-pr-state-notes-ref old-anchor (list legacy))
+      (git-appraise-pr-state-hydrate pr)
+      (should (equal (oref pr feedback) "Old feedback"))
+      (oset pr feedback "Updated feedback")
+      (git-appraise-pr-state-persist pr t)
+      (should (equal (a-get (git-appraise-pr-state--read-at
+                             directory pr revision) 'feedback)
+                     "Updated feedback"))
+      (should (equal (a-get (git-appraise-pr-state--read-at
+                             directory pr old-anchor) 'feedback)
+                     "Old feedback")))))
+
 (provide 'git-appraise-pr-state-test)
 ;;; git-appraise-pr-state-test.el ends here

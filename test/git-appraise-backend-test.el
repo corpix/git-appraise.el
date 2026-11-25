@@ -150,9 +150,9 @@
                          :position 0 :line-type "FILE"))
           (callback-count 0))
      (oset pr raw-diff diff)
-     (git-appraise-new-code-comment
+     (git-appraise-backend-send-code-comment
       pr comment (lambda () (setq callback-count (1+ callback-count))))
-     (git-appraise-new-code-comment
+     (git-appraise-backend-send-code-comment
       pr file-comment (lambda () (setq callback-count (1+ callback-count))))
      (should (equal callback-count 2))
      (let* ((native (git-appraise-backend-test--show directory revision))
@@ -179,12 +179,131 @@
 				     'comments))
 			     'children))
 		       '(comment description)) "Reply")))
-     (let ((decision (git-appraise-submit-appraise-review)))
+     (let ((decision (git-appraise-native-publication)))
        (oset decision pr pr)
        (oset decision state "APPROVE")
-       (git-appraise-send-review decision (lambda () (setq callback-count (1+ callback-count))))
+       (git-appraise-backend-publish-review decision (lambda () (setq callback-count (1+ callback-count))))
        (should (eq (a-get (git-appraise-backend-test--show directory revision) 'resolved) t))
        (should (equal callback-count 3))))))
+
+;;; req-2026-11-25-057: mixed needs-work submission
+;; covers: git-appraise-backend.el git-appraise-actions.el
+;; covers-fn: git-appraise-backend-publish-review
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-057-mixed-needs-work ()
+  "WHEN a reviewer publishes actionable and FYI findings THE SYSTEM SHALL preserve each finding's chosen status."
+  (git-appraise-backend-test-with-repo
+    (let* ((pr (git-appraise-backend-open revision))
+           (submission (git-appraise-native-publication))
+           (diff (git-appraise-test--run directory "git-appraise" "show" "-diff" revision)))
+      (oset pr raw-diff diff)
+      (oset submission pr pr)
+      (oset submission state "NEEDS_WORK")
+      (oset submission local-comments
+            (list (git-appraise-submit-local-comment
+                   :path "example.txt" :position 3 :line-type "ADDED"
+                   :body "Must fix" :internal-id "actionable" :fyi nil)
+                  (git-appraise-submit-local-comment
+                   :path "example.txt" :position 3 :line-type "ADDED"
+                   :body "For context" :internal-id "fyi" :fyi t)))
+      (git-appraise-backend-publish-review submission #'ignore)
+      (let ((threads (a-get (git-appraise-backend-test--show directory revision)
+                            'comments)))
+        (should (eq :false
+                    (a-get-in (car (--filter
+                                     (equal (a-get-in it '(comment description))
+                                            "Must fix") threads))
+                              '(comment resolved))))
+        (should-not (a-get-in (car (--filter
+                                    (equal (a-get-in it '(comment description))
+                                           "For context") threads))
+                              '(comment resolved)))))))
+
+;;; req-2026-11-25-058: explicit thread resolution
+;; covers: git-appraise-backend.el
+;; covers-fn: git-appraise-backend-send-reply
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-058-resolve-by-reply ()
+  "WHEN a reviewer explicitly addresses a finding THE SYSTEM SHALL attach a resolving reply to that finding."
+  (git-appraise-backend-test-with-repo
+    (let ((pr (git-appraise-backend-open revision)))
+      (git-appraise-backend--send-comment pr "Fix this" nil nil nil 'needs-work)
+      (let* ((root (car (a-get (git-appraise-backend-test--show directory revision)
+                               'comments)))
+             (hash (a-get root 'hash)))
+        (git-appraise-backend-send-reply pr hash "Fixed in the next commit" t)
+        (let* ((updated (car (a-get
+                              (git-appraise-backend-test--show directory revision)
+                              'comments)))
+               (child (car (a-get updated 'children))))
+          (should (equal hash (a-get-in child '(comment parent))))
+          (should (eq t (a-get-in child '(comment resolved))))
+          (should-not (eq :false (a-get updated 'resolved))))))))
+
+;;; req-2026-11-25-061: review identity survives appended commits
+;; covers: git-appraise-backend.el git-appraise-db.el
+;; covers-fn: git-appraise-backend-refresh, git-appraise-backend--native-review
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-061-native-review-follows-branch ()
+  "WHEN new commits arrive on a reviewed branch THE SYSTEM SHALL retain the review identity and use the new head."
+  (git-appraise-backend-test-with-repo
+    (let ((git-appraise-history-enabled nil)
+          (pr (git-appraise-backend-open revision)))
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (should (equal revision (oref (oref pr native-review) revision)))
+      (with-temp-file (expand-file-name "example.txt" directory)
+        (insert "first\nchanged\nthird\nfourth\n"))
+      (git-appraise-test--run directory "git" "commit" "-qam" "followup")
+      (let ((new-head (git-appraise-test--run directory "git" "rev-parse" "HEAD"))
+            (git-appraise-section-full-refresh? t))
+        (git-appraise-backend-refresh pr (git-appraise-pr-buffer-name pr))
+        (should (equal revision (oref (oref pr native-review) revision)))
+        (should (equal new-head (oref (oref pr native-review) head)))))))
+
+;;; req-2026-11-25-062: partial publication retains only unsent drafts
+;; covers: git-appraise-backend.el git-appraise-db.el git-appraise-pr-state.el
+;; covers-fn: git-appraise-backend-publish-review, git-appraise-db-delete-raw-comment
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-062-partial-send-retry ()
+  "WHEN a publication stops after one successful comment THE SYSTEM SHALL retain only unsent drafts for retry."
+  (git-appraise-backend-test-with-repo
+    (let* ((pr (git-appraise-backend-open revision))
+           (submission (git-appraise-native-publication))
+           (send (symbol-function 'git-appraise-backend--send-comment))
+           (attempts 0))
+      (oset submission pr pr)
+      (oset submission state "COMMENT")
+      (dolist (pair '(("first" . "One") ("second" . "Two")))
+        (git-appraise-db--pullreq-raw-comments-update
+         `((state . "LOCAL COMMENT")
+           (comments (nodes ((internal-id . ,(car pair))
+                             (bodyText . ,(cdr pair))
+                             (path . "example.txt")
+                             (line-type . "FILE")
+                             (local? . t)))))))
+      (oset submission local-comments
+            (list (git-appraise-submit-local-comment
+                   :path "example.txt" :line-type "FILE"
+                   :body "Two" :internal-id "second")
+                  (git-appraise-submit-local-comment
+                   :path "example.txt" :line-type "FILE"
+                   :body "One" :internal-id "first")))
+      (cl-letf (((symbol-function 'git-appraise-backend--send-comment)
+                 (lambda (&rest args)
+                   (cl-incf attempts)
+                   (if (= attempts 2)
+                       (error "injected send failure")
+                     (apply send args)))))
+        (should-error (git-appraise-backend-publish-review submission #'ignore)))
+      (should (= 1 (length (a-get (git-appraise-backend-test--show
+                                   directory revision) 'comments))))
+      (should (= 1 (length (oref pr raw-comments))))
+      (should (equal "second"
+                     (a-get (car (a-get-in (car (oref pr raw-comments))
+                                           '(comments nodes)))
+                            'internal-id))))))
 
 (ert-deftest git-appraise-backend/keeps-comments-on-earlier-commits-readable-after-the-review-ref-moves ()
   "keeps comments on earlier commits readable after the review ref moves"
@@ -214,11 +333,11 @@
   (git-appraise-backend-test-with-repo
    (let* ((pr (git-appraise-backend-repo
                :owner directory :repo "example" :number revision))
-          (decision (git-appraise-submit-appraise-review)))
+          (decision (git-appraise-native-publication)))
      (oset decision pr pr)
      (oset decision state "REQUEST_CHANGES")
      (oset decision feedback "Needs more work")
-     (git-appraise-send-review decision (lambda ()))
+     (git-appraise-backend-publish-review decision (lambda ()))
      (let ((native (git-appraise-backend-test--show directory revision)))
        (should (eq (a-get native 'resolved) :false))
        (should (equal (git-appraise-backend--state native) "REJECTED"))))))
@@ -236,7 +355,7 @@
                     :position 2 :line-type "REMOVED")))
      (oset pr raw-diff diff)
      (should (eq (condition-case nil
-                     (progn (git-appraise-new-code-comment pr comment (lambda ())) nil)
+                     (progn (git-appraise-backend-send-code-comment pr comment (lambda ())) nil)
                    (user-error t)) t))
      (should-not (a-get (git-appraise-backend-test--show directory revision)
 			'comments)))))
@@ -257,7 +376,7 @@
        (insert "first\nchanged again\nthird\n"))
      (git-appraise-test--run directory "git" "commit" "-qam" "followup")
      (let ((err (condition-case e
-                    (progn (git-appraise-new-code-comment pr comment (lambda ())) nil)
+                    (progn (git-appraise-backend-send-code-comment pr comment (lambda ())) nil)
                   (user-error e))))
        ;; The old blocking UX must be gone.  If the comment cannot be
        ;; remapped on the new diff, a remap error is acceptable; a
@@ -328,6 +447,62 @@
                             'comments))))
         (should thread)
         (should (= (a-get-in thread '(comment location range startLine)) 2))))))
+
+;;; req-2026-11-25-063: ordinary comment editing stages review feedback
+;; covers: git-appraise-comment.el git-appraise-comment-draft.el git-appraise-actions.el
+;; covers-fn: git-appraise-comment-add-or-edit, git-appraise-submit-needs-work
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-063-stage-then-publish-finding ()
+  "WHEN a reviewer drafts an inline finding THE SYSTEM SHALL keep it private until the reviewer publishes needs-work feedback."
+  (git-appraise-backend-test-with-repo
+    (let ((git-appraise-history-enabled nil))
+      (git-appraise-backend-open revision)
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (search-forward "+changed")
+        (beginning-of-line)
+        (git-appraise-comment-add-or-edit))
+      (with-current-buffer git-appraise-comment-buffer-name
+        (erase-buffer)
+        (insert "Fix this before merge")
+        (git-appraise-comment-commit))
+      (should-not (a-get (git-appraise-backend-test--show directory revision)
+                         'comments))
+      (should (cl-find-if #'git-appraise-db--local-comment-entry-p
+                          (oref (git-appraise-db-get-pullreq) raw-comments)))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (git-appraise-submit-needs-work))
+      (let ((thread (car (a-get
+                          (git-appraise-backend-test--show directory revision)
+                          'comments))))
+        (should (equal "Fix this before merge"
+                       (a-get-in thread '(comment description))))
+        (should (eq :false (a-get-in thread '(comment resolved))))))))
+
+;;; req-2026-11-25-064: request edits retain native review identity
+;; covers: git-appraise-backend.el git-appraise-comment.el
+;; covers-fn: git-appraise-backend-update-request
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-064-update-request ()
+  "WHEN an author edits a review request THE SYSTEM SHALL keep its review identity and discussion."
+  (git-appraise-backend-test-with-repo
+    (let* ((pr (git-appraise-backend-open revision))
+           (before (git-appraise-backend-test--show directory revision)))
+      (git-appraise-backend--send-comment pr "Keep this discussion")
+      (git-appraise-backend-update-request pr "Updated title\nUpdated details")
+      (let ((after (git-appraise-backend-test--show directory revision)))
+        (should (equal (a-get after 'revision) revision))
+        (should (equal (a-get-in after '(request description))
+                       "Updated title\nUpdated details"))
+        (should (equal (a-get-in after '(request reviewRef))
+                       (a-get-in before '(request reviewRef))))
+        (should (equal (a-get-in after '(request targetRef))
+                       (a-get-in before '(request targetRef))))
+        (should (= 1 (length (a-get after 'comments))))))))
 
 ;;; req-2026-11-24-001: inline comment location survives header-like content
 ;; covers: git-appraise-backend.el

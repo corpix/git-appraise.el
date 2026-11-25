@@ -25,14 +25,10 @@
 (defvar git-appraise-db--objects (make-hash-table :test 'equal)
   "In-memory store mapping object id to pullreq objects.")
 
-(defclass git-appraise-db-pullreq ()
+(defclass git-appraise-db-review ()
   ((id            :initarg :id)
    (base-ref-name :initform nil)
    (head-ref-name :initform nil)
-   (finished      :initform nil)
-   (finished-at   :initform nil)
-   (saved         :initform nil)
-   (saved-at      :initform nil)
    (raw-infos     :initform nil)
    (raw-diff      :initform nil)
    (diff-tables   :initform nil)
@@ -46,15 +42,6 @@
    (sha           :initform nil)
    (feedback      :initform nil)
    (state         :initform nil)
-   (replies       :initform nil)
-   (review        :initform nil)
-   (labels        :initform nil)
-   (merge         :initform nil)
-   (milestones    :initform nil)
-   (projects      :initform nil)
-   (reviewers     :initform nil)
-   (assignees     :initform nil)
-   (linked-issues :initform nil)
    (url           :initarg :url)
    ;; lightweight in-memory path bookkeeping for comment positioning
    (paths         :initform nil))
@@ -120,10 +107,6 @@
       (oset pullreq head-ref-name .headRefName)
       (oset pullreq description .bodyHTML)
       (oset pullreq sha .headRefOid)
-      (oset pullreq assignees .assignees.nodes)
-      (oset pullreq milestones `((title . ,.milestone.title)
-                                 (perc . ,.milestone.progressPercentage)
-                                 (number . nil)))
       (git-appraise-db-update pullreq))))
 
 (defun git-appraise-db--pullreq-raw-diff-update (raw-diff)
@@ -179,26 +162,36 @@ Restore the in-memory comment list if the durable write fails."
 
 (defun git-appraise-db--pullreq-feedback-update (feedback)
   "Save FEEDBACK for current pullreq."
-  (let ((pr (git-appraise-db-get-pullreq)))
+  (let* ((pr (git-appraise-db-get-pullreq))
+         (old (oref pr feedback)))
     (oset pr feedback feedback)
-    (git-appraise-db-update pr)
-    (when (fboundp 'git-appraise-pr-state-persist)
-      (git-appraise-pr-state-persist pr))))
+    (condition-case err
+        (when (fboundp 'git-appraise-pr-state-persist)
+          (git-appraise-pr-state-persist pr t))
+      (error
+       (oset pr feedback old)
+       (signal (car err) (cdr err))))
+    (git-appraise-db-update pr)))
 
 (defun git-appraise-db--pullreq-raw-comments-update (comment)
   "Add COMMENT to the current pullreq raw comments."
   (let* ((pr (git-appraise-db-get-pullreq))
          (raw-comments (oref pr raw-comments)))
     (oset pr raw-comments (append raw-comments (list comment)))
-    (git-appraise-db-update pr)
-    (when (fboundp 'git-appraise-pr-state-persist)
-      (git-appraise-pr-state-persist pr))))
+    (condition-case err
+        (when (fboundp 'git-appraise-pr-state-persist)
+          (git-appraise-pr-state-persist pr t))
+      (error
+       (oset pr raw-comments raw-comments)
+       (signal (car err) (cdr err))))
+    (git-appraise-db-update pr)))
 
 (defun git-appraise-db-delete-raw-comment (identifier)
   "Remove comment identified by IDENTIFIER from raw comments list.
 IDENTIFIER can be our local `internal-id' (string UUID) or the provider
 `databaseId' (number or string)."
   (let* ((pr (git-appraise-db-get-pullreq))
+         (old (oref pr raw-comments))
          (id-str (cond ((numberp identifier) (number-to-string identifier))
                        ((stringp identifier) identifier)
                        (t (format "%s" identifier))))
@@ -213,11 +206,15 @@ IDENTIFIER can be our local `internal-id' (string UUID) or the provider
                                    (a-get node 'fullDatabaseId))))
                    (a-get-in it '(comments nodes)))))
              (when nodes (a-assoc-in it '(comments nodes) nodes)))
-           (oref pr raw-comments))))
+           old)))
     (oset pr raw-comments new-comments)
-    (git-appraise-db-update pr)
-    (when (fboundp 'git-appraise-pr-state-persist)
-      (git-appraise-pr-state-persist pr))))
+    (condition-case err
+        (when (fboundp 'git-appraise-pr-state-persist)
+          (git-appraise-pr-state-persist pr t))
+      (error
+       (oset pr raw-comments old)
+       (signal (car err) (cdr err))))
+    (git-appraise-db-update pr)))
 
 ;;; Path bookkeeping (in-memory, for diff wash comment positioning)
 

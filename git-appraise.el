@@ -22,7 +22,6 @@
 (require 'git-appraise-comment)
 (require 'git-appraise-utils)
 (require 'git-appraise-db)
-(require 'git-appraise-interfaces)
 (require 'git-appraise-faces)
 (require 'git-appraise-actions)
 (require 'git-appraise-folding)
@@ -148,12 +147,16 @@ offers local reviews instead of prompting for a URL."
   "Git Appraise."
   [["Review"
     ("a" "Approve" git-appraise-submit-approve)
-    ("r" "Request changes" git-appraise-submit-request-changes)
-    ("c" "Comment" git-appraise-submit-comments)]
+    ("r" "Send needs work" git-appraise-submit-needs-work)
+    ("c" "Send comments" git-appraise-submit-comments)
+    ("R" "Reject review" git-appraise-submit-reject)]
    ["Fast track"
     ("l" "LGTM" git-appraise-submit-lgtm)
     ("s c" "Single comment" git-appraise-submit-single-top-level-comment)
     ("s C" "Diff comment" git-appraise-submit-single-diff-comment-at-point)]
+   ["Discussion"
+    ("s r" "Resolve comment" git-appraise-resolve-comment-at-point)
+    ("s f" "Toggle draft FYI" git-appraise-toggle-draft-fyi)]
    ["Buffer"
     ("d" "Description" git-appraise-popup-pr-description)
     ("v" "Toggle viewed" git-appraise-viewed-toggle)

@@ -63,12 +63,12 @@
         (goto-char (point-min))
         (should (search-forward "draft across commits" nil t))))))
 
-;;; req-2026-11-24-130: line comment send remaps after head change
+;;; req-2026-11-24-130: line comment send preserves anchor safety after head change
 ;; covers: git-appraise-backend.el
-;; covers-fn: git-appraise-backend--line-for-comment, git-appraise-new-code-comment
+;; covers-fn: git-appraise-backend--line-for-comment, git-appraise-backend-send-code-comment
 ;; enforcement: test
 (ert-deftest git-appraise-active-dev-e2e/req-2026-11-24-130-send-remaps-after-head-change ()
-  "WHEN a reviewer sends a line comment after new commits appear THE SYSTEM SHALL refresh and send without a reload-before-sending block."
+  "WHEN a reviewer sends a line comment after new commits appear THE SYSTEM SHALL retain the draft until its location is checked."
   (git-appraise-active-dev-e2e-test-with-repo
     (git-appraise-active-dev-e2e-test--open-and-render revision)
     (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
@@ -89,11 +89,35 @@
                       :line-type "ADDED"
                       :send? t
                       :msg "remapped comment")))
-        (let ((err (condition-case e
-                       (progn (git-appraise-new-code-comment pr comment (lambda () nil)) nil)
-                     (user-error e))))
-          (when err
-            (should-not (string-match-p "reload before sending" (error-message-string err)))))))))
+        (should-error
+         (git-appraise-backend-send-code-comment pr comment (lambda () nil))
+         :type 'user-error)
+        (should-not (a-get (git-appraise-backend--read-review directory revision)
+                           'comments))))))
+
+;;; req-2026-11-25-067: integration changes invalidate old inline positions
+;; covers: git-appraise-backend.el git-appraise-backend-read.el
+;; covers-fn: git-appraise-backend--line-for-comment
+;; enforcement: test
+(ert-deftest git-appraise-active-dev-e2e/req-2026-11-25-067-integration-keeps-draft ()
+  "WHEN the target branch incorporates a review THE SYSTEM SHALL keep an old inline draft for re-anchoring."
+  (git-appraise-active-dev-e2e-test-with-repo
+    (git-appraise-active-dev-e2e-test--open-and-render revision)
+    (let ((pr (git-appraise-db-get-pullreq))
+          (comment (git-appraise-local-comment-section
+                    :state "LOCAL COMMENT" :author "Tester"
+                    :msg "Old location" :path "example.txt"
+                    :position 3 :line-type "ADDED")))
+      (git-appraise-test--run directory "git" "update-ref"
+                              "refs/heads/master" revision)
+      (should-not
+       (equal (oref (oref pr native-review) base)
+              (git-appraise-backend--git directory "merge-base"
+                                         "refs/heads/master" revision)))
+      (should-error (git-appraise-backend--line-for-comment pr comment)
+                    :type 'user-error)
+      (should-not (a-get (git-appraise-backend--read-review directory revision)
+                         'comments)))))
 
 ;;; req-2026-11-24-131: file draft visible after head change refresh
 ;; covers: git-appraise-comment-draft.el git-appraise-backend.el

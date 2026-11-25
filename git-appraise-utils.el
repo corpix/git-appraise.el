@@ -172,6 +172,7 @@
                                :path .path
                                :diffHunk .diffHunk
                                :internalId .internal-id
+                               :resolve? .resolve
                                :id .databaseId
                                :createdAt .createdAt
                                :updatedAt .updatedAt))
@@ -200,6 +201,7 @@
                                :position handled-pos
                                :reactions nil
                                :internalId .internal-id
+                               :fyi? .fyi
                                :path .path
                                :createdAt .createdAt
                                :updatedAt .updatedAt
