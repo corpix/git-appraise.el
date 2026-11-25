@@ -176,27 +176,49 @@ Skips review UI lines when counting and anchors to nearest patch line."
             (cons "RIGHT" (+ new-start (cdr adv)))))))))
 
 ;; Return location as plist supporting optional region
-(defun git-appraise--compute-line-side-and-range ()
-  "Compute review location at point with optional region.
+(defun git-appraise--compute-line-side-and-range (&optional region-beg region-end)
+  "Compute review location at point with optional REGION-BEG/REGION-END.
+Without bounds the active region is used when one is active.
 Returns plist with :side :line and optionally :start-side :start-line."
   (let* ((curr (git-appraise--compute-line-and-side))
          (side (car curr))
-         (line (cdr curr)))
-    (if (and (use-region-p)
-             (not (= (region-beginning) (region-end))))
+         (line (cdr curr))
+         (beg (or region-beg (and (use-region-p) (region-beginning))))
+         (end (or region-end (and (use-region-p) (region-end)))))
+    (if (and beg end (/= beg end))
         (save-excursion
-          (let* ((rb (region-beginning))
-                 (re (region-end))
-                 (beg (progn (goto-char rb) (git-appraise--compute-line-and-side)))
-                 (end (progn (goto-char re) (git-appraise--compute-line-and-side)))
-                 (start (if (<= rb re) beg end))
-                 (finish (if (<= rb re) end beg)))
+          (let* ((beg-side (progn (goto-char beg)
+                                  (git-appraise--compute-line-and-side)))
+                 (end-side (progn (goto-char end)
+                                  (git-appraise--compute-line-and-side)))
+                 (start (if (<= beg end) beg-side end-side))
+                 (finish (if (<= beg end) end-side beg-side)))
             (list :side (car finish)
                   :line (cdr finish)
                   :start-side (car start)
-                  :start-line (cdr start)))
-          )
+                  :start-line (cdr start))))
       (list :side side :line line))))
+
+(defun git-appraise--comment-region-bounds ()
+  "Validate the active region as patch lines within a single hunk.
+Return (BEG END).  A selection ending on a line boundary counts as
+ending through the previous line, so selecting a hunk's last lines
+with whole-line motions anchors inside the hunk."
+  (let* ((beg (region-beginning))
+         (end (if (save-excursion (goto-char (region-end))
+                                  (and (bolp) (> (region-end) beg)))
+                  (1- (region-end))
+                (region-end))))
+    (save-excursion
+      (let ((hunk-at
+             (lambda (pos)
+               (goto-char pos)
+               (unless (git-appraise--patch-line-p)
+                 (user-error "Select only patch lines for a comment"))
+               (magit-current-section))))
+        (unless (eq (funcall hunk-at beg) (funcall hunk-at end))
+          (user-error "Select patch lines within a single hunk"))))
+    (list beg end)))
 
 ;;; Comment C_UD
 
@@ -277,66 +299,56 @@ Optionally define a MSG."
   (user-error "Published git-appraise comments are append-only; add a reply instead"))
 
 (cl-defmethod git-appraise-comment-handler-add-or-edit (obj)
-  "Add a comment in the OBJ."
-  ;;; only hunks allowed here
+  "Add a comment in the OBJ.
+Comments must anchor to a file heading or a patch line: a position
+between the file heading and the hunk header has no source location."
   (with-slots (type) (magit-current-section)
     (if (and (equal type 'file)
              (git-appraise-backend-repo-p (git-appraise-db-get-pullreq)))
-        (let ((comment (git-appraise-local-comment-section
-                        :state "LOCAL COMMENT"
-                        :author (git-appraise-utils--git-get-user)
-                        :path (string-remove-prefix "b/" (substring-no-properties obj))
-                        :position 0
-                        :line-type "FILE"
-                        :send? nil)))
-          (setq git-appraise-comment-uncommitted comment)
-          (git-appraise-comment-add))
-      (if (not (equal type 'hunk))
-          (message "You can't add text over unspecified region.")
-        (let* ((current-line (line-number-at-pos))
-             (line (save-excursion
-                     (buffer-substring-no-properties
-                      (line-beginning-position)
-                      (line-end-position))))
-             (line-type (cond
-                         ((string-prefix-p "-" line)
-                          "REMOVED")
-                         ((string-prefix-p "+" line)
-                          "ADDED")
-                         (t
-                          "UNCHANGED")))
-             (amount-loc nil))
-        (save-excursion
-          (while (and (not (looking-at
-                            "Comment by\\|Reviewed by\\|Reply by\\|modified\\|new file\\|deleted"))
-                      (not (equal (point) (point-min))))
-            (forward-line -1))
-          (let ((section (magit-current-section)))
-            (if (not section)
-                (setq amount-loc 0)
-              (with-slots (type value) section
-                (if (equal type 'file)
-                    (setq amount-loc 0)
-                  (setq amount-loc (or (oref value amount-loc) 0)))))))
-
-        ;; Compute line/side and optional range (region)
-        (let* ((loc (git-appraise--compute-line-side-and-range))
-               (side (plist-get loc :side))
-               (line (plist-get loc :line))
-               (start-side (plist-get loc :start-side))
-               (start-line (plist-get loc :start-line))
-               (local-comment (git-appraise-local-comment-section
-                               :state "LOCAL COMMENT"
-                               :author (git-appraise-utils--git-get-user)
-                               :path (a-get obj 'path)
-                               :side side
-                               :line line
-                               :start-side start-side
-                               :start-line start-line
-                               :line-type line-type
-                               :send? git-appraise-comment-send?)))
-          (setq git-appraise-comment-uncommitted local-comment)
-          (git-appraise-comment-add)))))))
+        (let ((file (magit-current-section)))
+          (unless (= (line-beginning-position)
+                     (save-excursion
+                       (goto-char (oref file start))
+                       (line-beginning-position)))
+            (user-error "Place the file comment on its heading"))
+          (let ((comment (git-appraise-local-comment-section
+                          :state "LOCAL COMMENT"
+                          :author (git-appraise-utils--git-get-user)
+                          :path (string-remove-prefix "b/" (substring-no-properties obj))
+                          :position 0
+                          :line-type "FILE"
+                          :send? nil)))
+            (setq git-appraise-comment-uncommitted comment)
+            (git-appraise-comment-add)))
+      (unless (equal type 'hunk)
+        (user-error "Place the comment on a file heading or patch line"))
+      (unless (git-appraise--patch-line-p)
+        (user-error "Place the comment on a patch line"))
+      (let* ((region (when (use-region-p)
+                       (git-appraise--comment-region-bounds)))
+             (line-type (pcase (char-after (line-beginning-position))
+                          (?- "REMOVED")
+                          (?+ "ADDED")
+                          (_ "UNCHANGED")))
+             (loc (if region
+                      (apply #'git-appraise--compute-line-side-and-range region)
+                    (git-appraise--compute-line-side-and-range)))
+             (side (plist-get loc :side))
+             (line (plist-get loc :line))
+             (start-side (plist-get loc :start-side))
+             (start-line (plist-get loc :start-line))
+             (local-comment (git-appraise-local-comment-section
+                             :state "LOCAL COMMENT"
+                             :author (git-appraise-utils--git-get-user)
+                             :path (a-get obj 'path)
+                             :side side
+                             :line line
+                             :start-side start-side
+                             :start-line start-line
+                             :line-type line-type
+                             :send? git-appraise-comment-send?)))
+        (setq git-appraise-comment-uncommitted local-comment)
+        (git-appraise-comment-add)))))
 
 
 ;;;###autoload

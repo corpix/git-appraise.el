@@ -22,6 +22,18 @@
    (git-appraise-test--run directory "git-appraise" "show" "-json" revision)
    "test show"))
 
+(defun git-appraise-backend-test--first-file-and-hunk ()
+  "Return the first rendered file and real hunk sections."
+  (let (file)
+    (magit-map-sections
+     (lambda (s)
+       (when (and (not file) (eq (oref s type) 'file))
+         (setq file s)))
+     magit-root-section)
+    (list file (--first (and (magit-hunk-section-p it)
+                           (git-appraise-fold-state--hunk-identity it))
+                        (oref file children)))))
+
 (ert-deftest git-appraise-backend/discovers-local-reviews-and-handles-a-repository-without-reviews ()
   "discovers local reviews and handles a repository without reviews"
   (git-appraise-backend-test-with-repo
@@ -580,6 +592,62 @@
     ;; behavior is no blocking prompt and no draft loss.
     (should (cl-find-if #'git-appraise-db--local-comment-entry-p
                         (oref (git-appraise-db-get-pullreq) raw-comments)))))
+
+;;; req-2026-11-25-071: comments need a real diff anchor
+;; covers: git-appraise-comment.el
+;; covers-fn: git-appraise-comment-handler-add-or-edit, git-appraise--comment-region-bounds
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-071-reject-gap-comment ()
+  "WHEN a reviewer comments between a file heading and its patch THE SYSTEM SHALL require a real file or patch location."
+  (let ((git-appraise-test--before-request-hook
+         (lambda (directory)
+           (with-temp-file (expand-file-name "more.txt" directory)
+             (insert "more\n"))
+           (git-appraise-test--run directory "git" "add" "more.txt")
+           (git-appraise-test--run
+            directory "git" "commit" "--amend" "--no-edit" "-q"))))
+    (git-appraise-backend-test-with-repo
+      (let ((git-appraise-history-enabled nil)
+            (git-appraise-lazy-enabled nil))
+        (git-appraise-backend-open revision)
+        (let ((git-appraise-section-full-refresh? t))
+          (git-appraise--build-buffer))
+        (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name))))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (let ((transient-mark-mode t))
+          (pcase-let ((`(,file ,hunk)
+                       (git-appraise-backend-test--first-file-and-hunk)))
+            (should hunk)
+            (git-appraise-folding--set-file file nil)
+            ;; the gap between the file heading and the hunk header has
+            ;; no patch location, and neither does the hunk header itself
+            (goto-char (oref file content))
+            (should-error (git-appraise-comment-add-or-edit) :type 'user-error)
+            (goto-char (oref hunk start))
+            (should-error (git-appraise-comment-add-or-edit) :type 'user-error)
+            ;; a selection through the hunk's last line still anchors there
+            (goto-char (git-appraise--hunk-content-start hunk))
+            (push-mark (oref hunk end) t t)
+            (git-appraise-comment-add-or-edit)
+            (should (integerp (oref git-appraise-comment-uncommitted line)))
+            (should (integerp
+                     (oref git-appraise-comment-uncommitted start-line)))
+            (deactivate-mark)
+            (git-appraise-comment-reset-global-vars)
+            (let ((composer (get-buffer git-appraise-comment-buffer-name)))
+              (when composer (kill-buffer composer)))
+            ;; patch lines of two different hunks cannot form one range
+            (let ((hunks (let (all)
+                           (magit-map-sections
+                            (lambda (s)
+                              (when (magit-hunk-section-p s) (push s all)))
+                            magit-root-section)
+                           (nreverse all))))
+              (should (>= (length hunks) 2))
+              (goto-char (git-appraise--hunk-content-start (nth 0 hunks)))
+              (push-mark (git-appraise--hunk-content-start (nth 1 hunks)) t t)
+              (should-error (git-appraise-comment-add-or-edit) :type 'user-error)
+              (deactivate-mark))))))))
 
 (provide 'git-appraise-backend-test)
 ;;; git-appraise-backend-test.el ends here
