@@ -5,6 +5,7 @@
 
 ;;; Code:
 
+(require 'dash)
 (require 'json)
 (require 'subr-x)
 
@@ -44,62 +45,56 @@
 COMMANDS is a list of (TAG PROGRAM . ARGS).  Return an alist of
 (TAG . OUTPUT).  Signal `user-error' with the first failure,
 matching the single-command helpers."
-  (dolist (cmd commands)
-    (let ((program (nth 1 cmd)))
+  (--each commands
+    (let ((program (nth 1 it)))
       (when (and (stringp program)
                  (string= (file-name-nondirectory program) "git-appraise")
                  (not (executable-find "git-appraise")))
         (user-error "git-appraise is not installed or is absent from PATH"))))
   (let ((default-directory (file-name-as-directory directory))
-        (procs nil))
+        (procs nil)
+        (buffers nil))
     (unwind-protect
         (progn
-          (dolist (cmd commands)
-            (let* ((tag (nth 0 cmd))
-                   (program (nth 1 cmd))
-                   (args (cddr cmd))
-                   (buf (generate-new-buffer (format " *ga-par-%s*" tag)))
-                   (err-buf (generate-new-buffer (format " *ga-par-%s-err*" tag)))
-                   (proc (make-process
-                          :name (format "ga-par-%s" tag)
-                          :buffer buf
-                          :stderr err-buf
-                          :command (cons program args)
-                          :noquery t
-                          :sentinel #'ignore)))
-              (push (list tag program args proc buf err-buf) procs)))
+          (--each commands
+            (let* ((tag (nth 0 it))
+                   (program (nth 1 it))
+                   (args (cddr it))
+                   (buf (generate-new-buffer (format " *ga-par-%s*" tag))))
+              (push buf buffers)
+              (let ((proc (make-process
+                           :name (format "ga-par-%s" tag)
+                           :buffer buf
+                           :command (cons program args)
+                           :connection-type 'pipe
+                           :noquery t
+                           :sentinel #'ignore)))
+                (push (list tag program args proc buf) procs))))
           (let ((pending procs))
             (while pending
               (accept-process-output nil 0.1)
-              (let (live)
-                (dolist (p pending)
-                  (when (process-live-p (nth 3 p))
-                    (push p live)))
-                (setq pending (nreverse live)))))
-          (let (results)
-            (dolist (p (nreverse procs))
-              (pcase-let ((`(,tag ,program ,args ,proc ,buf ,err-buf) p))
-                (let ((status (process-exit-status proc)))
-                  (unless (and (integerp status) (zerop status))
-                    (let ((err (with-current-buffer err-buf
-                                 (string-trim (buffer-string))))
-                          (out (with-current-buffer buf
-                                 (string-trim (buffer-string)))))
-                      (user-error "%s %s failed: %s"
-                                  (file-name-nondirectory program)
-                                  (car args)
-                                  (if (string-empty-p err) out err)))))
-                (push (cons tag (with-current-buffer buf (buffer-string)))
-                      results)))
-            (nreverse results)))
-      (dolist (p procs)
-        (let ((proc (nth 3 p))
-              (buf (nth 4 p))
-              (err-buf (nth 5 p)))
+              (--each pending
+                (let ((p it))
+                  (unless (process-live-p (nth 3 p))
+                    (let ((status (process-exit-status (nth 3 p))))
+                      (unless (and (integerp status) (zerop status))
+                        (let ((out (with-current-buffer (nth 4 p)
+                                     (string-trim (buffer-string)))))
+                          (user-error "%s %s failed: %s"
+                                      (file-name-nondirectory (nth 1 p))
+                                      (car (nth 2 p))
+                                      out)))))))
+              (setq pending (--filter (process-live-p (nth 3 it)) pending))))
+          (--map (cons (car it)
+                       (with-current-buffer (nth 4 it) (buffer-string)))
+                 (nreverse procs)))
+      (--each procs
+        (let ((proc (nth 3 it)))
           (when (process-live-p proc)
-            (delete-process proc))
-          (when (buffer-live-p buf) (kill-buffer buf))
-          (when (buffer-live-p err-buf) (kill-buffer err-buf)))))))
+            (delete-process proc))))
+      (--each buffers
+        (when (buffer-live-p it)
+          (kill-buffer it))))))
 
 (defun git-appraise-backend--git (directory &rest args)
   "Run Git with ARGS in DIRECTORY and return its trimmed output."
