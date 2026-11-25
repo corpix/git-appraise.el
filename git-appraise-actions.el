@@ -14,6 +14,9 @@
 (require 'let-alist)
 (require 'dash)
 
+(declare-function git-appraise-backend-abandon "git-appraise-backend")
+(declare-function git-appraise-backend--root "git-appraise-backend")
+
 (defcustom git-appraise-lgtm-message "LGTM! :thumbsup:"
   "Message to add to fast track LGTM git-appraise."
   :type 'string
@@ -292,6 +295,23 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
                    git-appraise-comment-single-comment-msg))
               (git-appraise-comment-add-or-edit)))
         (error "Single diff comment at point only available in hunk sections")))))
+
+;;;###autoload
+(defun git-appraise-abandon-current-review ()
+  "Abandon the current git-appraise review."
+  (interactive)
+  (let* ((pr (git-appraise-db-get-pullreq))
+         (root (or (and pr (slot-boundp pr 'owner) (oref pr owner))
+                   (git-appraise-backend--root)))
+         (revision (and pr (slot-boundp pr 'number) (oref pr number)))
+         (message (read-string "Abandon message (optional): ")))
+    (unless (and root revision)
+      (user-error "No current review to abandon"))
+    (git-appraise-backend-abandon root revision message)
+    (when (get-buffer (git-appraise-pr-buffer-name))
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise-reload)))
+    (message "Review abandoned")))
 
 ;;;###autoload
 (defun git-appraise-reload ()

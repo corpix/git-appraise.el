@@ -703,5 +703,24 @@ against the new diff instead of blocking the send."
     (git-appraise-db-delete-raw-comment (oref reply internal-id)))
   (funcall callback))
 
+(defun git-appraise-backend-abandon (directory revision message)
+  "Abandon REVIEW REVISION in DIRECTORY with MESSAGE."
+  (let ((msg (or message "")))
+    (apply #'git-appraise-backend--run directory
+           (append (if (string-empty-p (string-trim msg))
+                       '("abandon")
+                     (list "abandon" "-m" msg))
+                   (list revision)))))
+
+;;;###autoload
+(defun git-appraise-abandon-review (revision)
+  "Abandon git-appraise REVISION in the current repository."
+  (interactive
+   (list (git-appraise-backend-select-review)))
+  (let* ((root (git-appraise-backend--root))
+         (message (read-string "Abandon message (optional): ")))
+    (git-appraise-backend-abandon root revision message)
+    (message "Review abandoned: %s" revision)))
+
 (provide 'git-appraise-backend)
 ;;; git-appraise-backend.el ends here
