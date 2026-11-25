@@ -26,6 +26,8 @@
                   (section))
 (declare-function git-appraise-lazy-placeholder-section-p "git-appraise-lazy"
                   (section))
+(declare-function git-appraise-wash--refresh-file-comment-count
+                  "git-appraise-section-wash" (section path))
 
 (defun git-appraise-comment--hunk-ancestor (section)
   "The nearest magit hunk section at or above SECTION, or nil."
@@ -177,7 +179,17 @@ duplicate the comment."
     (git-appraise-utils--timed
      "comment:persist-draft"
      (lambda () (git-appraise-db--upsert-local-comment entry previous)))
-    (oset obj internalId id)))
+    (oset obj internalId id)
+    (git-appraise-comment--refresh-file-count
+     (oref obj path) (git-appraise-pr-buffer-name))))
+
+(defun git-appraise-comment--refresh-file-count (path buff-name)
+  "Update PATH's comment count in review buffer BUFF-NAME."
+  (when (and (stringp path) (not (string-empty-p path)))
+    (when-let* ((buf (get-buffer buff-name))
+                (file (git-appraise-comment--file-section buff-name path)))
+      (with-current-buffer buf
+        (git-appraise-wash--refresh-file-comment-count file path)))))
 
 (defun git-appraise-comment--goto-saved-comment (obj &optional buff-name)
   "Move point to OBJ's section in BUFF-NAME after a draft rebuild.
@@ -323,7 +335,12 @@ be found, so callers can rebuild."
         (oset pr raw-comments (append (oref pr raw-comments) (list raw-comment)))
         (git-appraise-db-update pr)
         (if (git-appraise-comment--insert-reply-in-place obj (git-appraise-pr-buffer-name))
-            (git-appraise-comment--goto-saved-comment obj)
+            (progn
+              ;; the reply's node carries the parent's path: the file
+              ;; heading's count must move with it
+              (git-appraise-comment--refresh-file-count
+               (oref obj path) (git-appraise-pr-buffer-name))
+              (git-appraise-comment--goto-saved-comment obj))
           (let ((git-appraise-section-full-refresh? nil))
             (git-appraise--build-buffer))
           (git-appraise-comment--goto-saved-comment obj))

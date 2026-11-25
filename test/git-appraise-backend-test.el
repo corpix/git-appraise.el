@@ -649,5 +649,94 @@
               (should-error (git-appraise-comment-add-or-edit) :type 'user-error)
               (deactivate-mark))))))))
 
+;;; req-2026-11-25-072: file comment count updates as drafts change
+;; covers: git-appraise-comment-draft.el git-appraise-section-wash.el git-appraise-actions.el
+;; covers-fn: git-appraise-comment--save-draft, git-appraise-wash--refresh-file-comment-count, git-appraise-section-delete-comment
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-072-inline-draft-updates-file-count ()
+  "WHEN a reviewer adds, replies to or removes an inline draft THE SYSTEM SHALL update that file's visible comment count."
+  (git-appraise-backend-test-with-repo
+    (let ((git-appraise-history-enabled nil)
+          (git-appraise-lazy-enabled nil))
+      (git-appraise-backend-open revision)
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name))))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (pcase-let ((`(,file ,hunk) (git-appraise-backend-test--first-file-and-hunk)))
+        (should hunk)
+        (git-appraise-folding--set-file file nil)
+        (goto-char (oref hunk start))
+        (forward-line 1)
+        (should (git-appraise--patch-line-p))
+        (git-appraise-comment-add-or-edit)
+        (with-current-buffer git-appraise-comment-buffer-name
+          (erase-buffer)
+          (insert "Inline count")
+          (git-appraise-comment-commit))
+        (goto-char (oref file start))
+        (should (string-match-p "💬1" (buffer-substring-no-properties
+                                      (line-beginning-position)
+                                      (line-end-position))))
+        ;; a committed draft and an in-place reply both move the count
+        (let* ((parent (git-appraise-local-comment-section
+                        :state "LOCAL COMMENT"
+                        :author "Tester"
+                        :path "example.txt"
+                        :side "RIGHT"
+                        :line 2
+                        :line-type "ADDED"
+                        :send? nil
+                        :msg "parent for count"))
+               (reply (git-appraise-reply-comment-section
+                       :state "COMMENTED"
+                       :author "Tester"
+                       :path "example.txt"
+                       :position 3
+                       :diffHunk "@@ -1,2 +1,3 @@"
+                       :id 77
+                       :msg "reply count"))
+               (builds 0))
+          (oset parent id 77)
+          (setq git-appraise-comment-cursor-pos (oref hunk start)
+                git-appraise-comment-uncommitted parent
+                git-appraise-comment-commit-buffer? nil)
+          (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                     (lambda (&rest _) (cl-incf builds))))
+            (git-appraise-comment-handler-commit
+             parent git-appraise-comment-buffer-msg)
+            (goto-char (oref file start))
+            (should (string-match-p "💬2" (buffer-substring-no-properties
+                                          (line-beginning-position)
+                                          (line-end-position))))
+            (setq git-appraise-comment-uncommitted reply)
+            (cl-letf (((symbol-function 'git-appraise-backend-send-reply)
+                       (lambda (&rest _) nil)))
+              (git-appraise-comment-handler-commit
+               reply git-appraise-comment-buffer-msg))
+            (should (= builds 0))
+            (goto-char (oref file start))
+            (should (string-match-p "💬3" (buffer-substring-no-properties
+                                          (line-beginning-position)
+                                          (line-end-position))))))
+        (git-appraise-comment-reset-global-vars)
+        ;; deleting one draft drops the count again
+        (let (draft)
+          (magit-map-sections
+           (lambda (s)
+             (when (and (not draft) (git-appraise-local-comment-section-p s))
+               (setq draft s)))
+           magit-root-section)
+          (should draft)
+          (goto-char (oref draft start))
+          (git-appraise-section-delete-comment))
+        (goto-char (oref file start))
+        (should (string-match-p "💬2" (buffer-substring-no-properties
+                                      (line-beginning-position)
+                                      (line-end-position))))
+        (should-not (string-match-p "💬3" (buffer-substring-no-properties
+                                          (line-beginning-position)
+                                          (line-end-position))))))))
+
 (provide 'git-appraise-backend-test)
 ;;; git-appraise-backend-test.el ends here

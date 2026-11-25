@@ -22,6 +22,8 @@
 (declare-function git-appraise-backend-send-reply "git-appraise-backend")
 (declare-function git-appraise-comment--find-section-by-internal-id
                   "git-appraise-comment-draft")
+(declare-function git-appraise-comment--refresh-file-count
+                  "git-appraise-comment-draft" (path buff-name))
 (declare-function git-appraise-lazy-placeholder-section-p "git-appraise-lazy"
                   (section))
 
@@ -53,6 +55,9 @@
     (let ((git-appraise-db--pullreq-id git-appraise-review-buffer-pr-id)
           (buff-name (git-appraise-pr-buffer-name)))
       (git-appraise-db-delete-raw-comment id)
+      (when (and (slot-boundp value 'path) (oref value path))
+        (git-appraise-comment--refresh-file-count
+         (oref value path) buff-name))
       (let ((deleted
              (when (buffer-live-p (get-buffer buff-name))
                (with-current-buffer buff-name

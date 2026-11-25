@@ -257,6 +257,24 @@ INFO supplies its classification; LAZY marks a deferred file."
                            ,@(when lazy '(git-appraise-lazy t))))
     (git-appraise-wash--insert-file-tags clean-path info)))
 
+(defun git-appraise-wash--refresh-file-comment-count (section path)
+  "Refresh PATH's comment count in rendered file SECTION."
+  (let* ((count (git-appraise-history--file-count path))
+         (label (if (and git-appraise-comment-indicator (> count 0))
+                    (format "%s%d" git-appraise-comment-indicator count)
+                  ""))
+         (inhibit-read-only t))
+    (save-excursion
+      (goto-char (oref section start))
+      (let* ((column (+ (line-beginning-position) 11 5
+                        (if git-appraise-show-file-change-summary 12 0) 3))
+             (properties (text-properties-at column)))
+        (when (<= (+ column 5) (line-end-position))
+          (delete-region column (+ column 5))
+          (goto-char column)
+          (insert (format "%-5s" label))
+          (add-text-properties column (point) properties))))))
+
 (defun git-appraise-wash-insert-file-section
     (file orig status modes rename header binary long-status
           &optional canonical-path)
