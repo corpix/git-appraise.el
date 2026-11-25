@@ -676,6 +676,85 @@ git error."
            (git-appraise-viewed--reproject)
            (git-appraise-viewed--apply-in-place)))))
 
+(defun git-appraise-viewed--region-file-sections ()
+  "File sections in the active region, deduped in buffer order."
+  (when (use-region-p)
+    (let (files seen)
+      (dolist (sec (magit-region-sections))
+        (let ((f (git-appraise-eldoc--file-section sec)))
+          (when (and f (not (memq f seen)))
+            (push f seen)
+            (push f files))))
+      (nreverse files))))
+
+(defun git-appraise-viewed--file-viewed-p (file)
+  "Return non-nil when FILE is fully viewed."
+  (pcase (git-appraise-viewed--file-target file)
+    (`(,path ,items ,no-hunk?)
+     (let ((idx (and git-appraise-section--viewed
+                     (gethash path git-appraise-section--viewed))))
+       (if no-hunk?
+           (plist-get idx :file)
+         (--all? (member (cdr it) (plist-get idx :hunk-viewed))
+                 items))))
+    (_ nil)))
+
+(defun git-appraise-viewed--write-bulk-events (groups)
+  "Write GROUPS of (PATH ITEMS VIEWED) in one append, then refresh UI.
+GROUPS with nil ITEMS are ignored."
+  (let* ((groups (--filter (nth 1 it) groups))
+         (repo (git-appraise-viewed--repo-dir))
+         (revision (git-appraise-viewed--revision))
+         (actor (and repo (git-appraise-viewed--actor repo))))
+    (cond
+     ((null groups) nil)
+     ((not (and repo revision))
+      (user-error "No review repository context to store viewed marks"))
+     ((not actor)
+      (user-error "Set git user.email in %s to store viewed marks" repo))
+     (t
+      (let (events)
+        (dolist (group groups)
+          (pcase-let ((`(,path ,items ,viewed) group))
+            (dolist (item items)
+              (push (git-appraise-viewed--make-event
+                     actor path (car item) (cdr item) viewed)
+                    events))))
+        (condition-case err
+            (git-appraise-metadata-append
+             repo git-appraise-viewed-notes-ref revision (nreverse events))
+          (error (user-error "Could not save the viewed mark: %s"
+                             (error-message-string err))))
+        (git-appraise-viewed--invalidate repo revision)
+        (git-appraise-viewed--load repo revision)
+        (git-appraise-viewed--reproject)
+        (git-appraise-viewed--apply-in-place))))))
+
+(defun git-appraise-viewed--toggle-files (files)
+  "Toggle viewed state for FILES as a group.
+If every file is fully viewed, unmark all; otherwise mark all
+missing items in every file."
+  (let* ((targets (--keep (git-appraise-viewed--file-target it) files))
+         (all-viewed? (and targets (--all? (git-appraise-viewed--file-viewed-p it) files))))
+    (unless targets
+      (user-error "No file identities in selection to mark viewed"))
+    (let (groups)
+      (dolist (target targets)
+        (pcase-let ((`(,path ,items ,no-hunk?) target))
+          (let* ((idx (and git-appraise-section--viewed
+                           (gethash path git-appraise-section--viewed)))
+                 (items-to-write
+                  (cond
+                   (all-viewed? items)
+                   (no-hunk?
+                    (unless (plist-get idx :file) items))
+                   (t (--filter (not (member (cdr it)
+                                             (plist-get idx :hunk-viewed)))
+                                items)))))
+            (when items-to-write
+              (push (list path items-to-write (not all-viewed?)) groups)))))
+      (git-appraise-viewed--write-bulk-events (nreverse groups)))))
+
 (defun git-appraise-viewed--toggle-hunk ()
   "Toggle the viewed mark of the hunk at point."
   (pcase (git-appraise-viewed--current-hunk-target)
@@ -708,24 +787,43 @@ or unviewed file is marked (only the missing items are written)."
 
 (defun git-appraise-viewed-toggle ()
   "Toggle the viewed mark at point: the hunk under the cursor, or
-the whole file when point is on a file heading."
+the whole file when point is on a file heading.
+With an active region, toggle viewed state for every selected file
+as a group: unmark all when every selected file is fully viewed,
+otherwise mark all selected files viewed."
   (interactive)
-  (let* ((sec (magit-current-section))
-         (file (and sec (git-appraise-eldoc--file-section sec))))
-    (cond
-     ((and file (eq sec file))
-      (git-appraise-viewed--toggle-file file))
-     ((git-appraise-viewed--current-hunk)
-      (git-appraise-viewed--toggle-hunk))
-     (file (git-appraise-viewed--toggle-file file))
-     (t (user-error "No file or hunk at point to mark viewed")))))
+  (if (use-region-p)
+      (let ((region-files (git-appraise-viewed--region-file-sections)))
+        (if region-files
+            (progn
+              (git-appraise-viewed--toggle-files region-files)
+              (deactivate-mark))
+          (user-error "No file sections in region to mark viewed")))
+    (let* ((sec (magit-current-section))
+           (file (and sec (git-appraise-eldoc--file-section sec))))
+      (cond
+       ((and file (eq sec file))
+        (git-appraise-viewed--toggle-file file))
+       ((git-appraise-viewed--current-hunk)
+        (git-appraise-viewed--toggle-hunk))
+       (file (git-appraise-viewed--toggle-file file))
+       (t (user-error "No file or hunk at point to mark viewed"))))))
 
 (defun git-appraise-viewed-toggle-file ()
-  "Toggle the viewed mark for the whole file at or around point."
+  "Toggle the viewed mark for the whole file at or around point.
+With an active region, toggle viewed state for every selected file
+as a group."
   (interactive)
-  (if-let* ((file (git-appraise-eldoc--file-section (magit-current-section))))
-      (git-appraise-viewed--toggle-file file)
-    (user-error "No file at point to mark viewed")))
+  (if (use-region-p)
+      (let ((region-files (git-appraise-viewed--region-file-sections)))
+        (if region-files
+            (progn
+              (git-appraise-viewed--toggle-files region-files)
+              (deactivate-mark))
+          (user-error "No file sections in region to mark viewed")))
+    (if-let* ((file (git-appraise-eldoc--file-section (magit-current-section))))
+        (git-appraise-viewed--toggle-file file)
+      (user-error "No file at point to mark viewed"))))
 
 (provide 'git-appraise-viewed)
 ;;; git-appraise-viewed.el ends here

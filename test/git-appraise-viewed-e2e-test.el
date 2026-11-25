@@ -562,5 +562,83 @@ the countable items are 3 hunks + 1 hunk-less file."
       (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
       (should (equal (git-appraise-viewed-e2e-test--file-fold-states) expected)))))
 
+(defun git-appraise-viewed-e2e-test--file-paths-in-order ()
+  "Modified file paths in buffer order."
+  (with-current-buffer (git-appraise-pr-buffer-name)
+    (let (paths)
+      (magit-map-sections
+       (lambda (s)
+         (when (magit-file-section-p s)
+           (push (oref s value) paths)))
+       magit-root-section)
+      (nreverse paths))))
+
+(defun git-appraise-viewed-e2e-test--set-region-over-paths (paths)
+  "Set an active region spanning file headings for PATHS."
+  (with-current-buffer (git-appraise-pr-buffer-name)
+    (transient-mark-mode 1)
+    (let (beg end)
+      (dolist (path paths)
+        (goto-char (point-min))
+        (re-search-forward
+         (concat "^modified[ \t]+.*" (regexp-quote path) "\\(?:[ \t]\\|$\\)"))
+        (let ((bol (line-beginning-position))
+              (eol (line-end-position)))
+          (setq beg (if beg (min beg bol) bol)
+                end (if end (max end eol) eol))))
+      (goto-char end)
+      (set-mark beg)
+      (goto-char end)
+      (activate-mark))))
+
+(defun git-appraise-viewed-e2e-test--file-viewed-indicator-p (path)
+  "Return non-nil when PATH's file heading shows a viewed indicator."
+  (with-current-buffer (git-appraise-pr-buffer-name)
+    (goto-char (point-min))
+    (re-search-forward
+     (concat "^modified[ \t]+.*" (regexp-quote path) "\\(?:[ \t]\\|$\\)"))
+    (string-match-p "✓"
+                    (buffer-substring-no-properties
+                     (line-beginning-position)
+                     (line-end-position)))))
+
+;;; req-2026-11-25-030:
+;; covers: git-appraise-viewed.el
+;; covers-fn: git-appraise-viewed-toggle, git-appraise-viewed-toggle-file, git-appraise-viewed--region-file-sections, git-appraise-viewed--toggle-files
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-25-030-region-bulk-toggle-viewed ()
+  "WHEN a region selects multiple file sections and the user toggles viewed,
+THE SYSTEM SHALL apply a group viewed action across the selected files, including folded files."
+  (git-appraise-viewed-e2e-test--with-review
+    (git-appraise-viewed-e2e-test--build directory revision)
+    (let* ((paths (git-appraise-viewed-e2e-test--file-paths-in-order))
+           (selected (cl-subseq paths 0 2))
+           (unselected (nth 2 paths))
+           (selected-items (cl-loop for p in selected
+                                    sum (if (equal p "big.txt") 2 1))))
+      ;; Fold the first selected file to prove folded selection works.
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (re-search-forward
+         (concat "^modified[ \t]+.*" (regexp-quote (car selected)) "\\(?:[ \t]\\|$\\)"))
+        (let ((sec (git-appraise-eldoc--file-section (magit-current-section))))
+          (git-appraise-folding--set-file sec t)))
+      (git-appraise-viewed-e2e-test--set-region-over-paths selected)
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (call-interactively #'git-appraise-viewed-toggle))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (should (string-match-p
+               (format "%d/4 viewed" selected-items)
+               (git-appraise-viewed-e2e-test--rendered)))
+      (dolist (p selected)
+        (should (git-appraise-viewed-e2e-test--file-viewed-indicator-p p)))
+      (should-not (git-appraise-viewed-e2e-test--file-viewed-indicator-p unselected))
+      ;; Group semantics: all selected files fully viewed -> unmark all selected.
+      (git-appraise-viewed-e2e-test--set-region-over-paths selected)
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (call-interactively #'git-appraise-viewed-toggle))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (should (string-match-p "0/4 viewed" (git-appraise-viewed-e2e-test--rendered))))))
+
 (provide 'git-appraise-viewed-e2e-test)
 ;;; git-appraise-viewed-e2e-test.el ends here

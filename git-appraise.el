@@ -194,7 +194,7 @@ offers local reviews instead of prompting for a URL."
   (when (boundp 'magit-section-highlight-current)
     (setq-local magit-section-highlight-current nil))
   (when (boundp 'magit-section-highlight-selection)
-    (setq-local magit-section-highlight-selection nil))
+    (setq-local magit-section-highlight-selection t))
   (when (bound-and-true-p hl-line-mode)
     (hl-line-mode -1)))
 
