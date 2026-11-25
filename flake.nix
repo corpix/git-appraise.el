@@ -28,19 +28,14 @@
             jq
             ((emacsPackagesFor emacs).emacsWithPackages (
               epkgs: with epkgs; [
-                buttercup
-                undercover
-                closql
                 magit
                 transient
                 a
                 s
-                ghub
+                dash
                 uuidgen
                 deferred
                 markdown-mode
-                forge
-                emojify
               ]
             ))
           ];
