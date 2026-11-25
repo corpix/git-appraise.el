@@ -121,6 +121,7 @@ offers local reviews instead of prompting for a URL."
     ("n" "New" git-appraise-backend-request)]
    ["Manage"
     ("a" "Abandon" git-appraise-abandon-review)
+    ("b" "Rebase" git-appraise-rebase-review)
     ("p" "Push" git-appraise-push-notes)
     ("P" "Pull" git-appraise-pull-notes)]])
 
@@ -161,6 +162,7 @@ offers local reviews instead of prompting for a URL."
     ("q" "Quit" transient-quit-one)]
    ["Manage"
     ("A" "Abandon" git-appraise-abandon-current-review)
+    ("b" "Rebase" git-appraise-rebase-current-review)
     ("p" "Push" git-appraise-push-notes)
     ("P" "Pull" git-appraise-pull-notes)]])
 

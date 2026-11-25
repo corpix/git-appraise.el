@@ -15,6 +15,7 @@
 (require 'dash)
 
 (declare-function git-appraise-backend-abandon "git-appraise-backend")
+(declare-function git-appraise-backend-rebase "git-appraise-backend")
 (declare-function git-appraise-backend--root "git-appraise-backend")
 
 (defcustom git-appraise-lgtm-message "LGTM! :thumbsup:"
@@ -312,6 +313,25 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
       (let ((git-appraise-section-full-refresh? t))
         (git-appraise-reload)))
     (message "Review abandoned")))
+
+;;;###autoload
+(defun git-appraise-rebase-current-review ()
+  "Rebase the current git-appraise review onto its target."
+  (interactive)
+  (let* ((pr (git-appraise-db-get-pullreq))
+         (root (or (and pr (slot-boundp pr 'owner) (oref pr owner))
+                   (git-appraise-backend--root)))
+         (revision (and pr (slot-boundp pr 'number) (oref pr number))))
+    (unless (and root revision)
+      (user-error "No current review to rebase"))
+    (unless (yes-or-no-p (format "Rebase current review %s onto its target? " revision))
+      (user-error "Rebase cancelled"))
+    (message "Rebasing review %s..." revision)
+    (git-appraise-backend-rebase root revision)
+    (when (get-buffer (git-appraise-pr-buffer-name))
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise-reload)))
+    (message "Review rebased")))
 
 ;;;###autoload
 (defun git-appraise-reload ()

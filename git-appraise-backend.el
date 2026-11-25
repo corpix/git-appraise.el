@@ -754,5 +754,25 @@ REMOTE defaults to \"origin\"."
       (ignore-errors (git-appraise--build-buffer)))
     (message "Pulled git-appraise notes from %s" remote)))
 
+(defun git-appraise-backend-rebase (directory &optional revision)
+  "Rebase git-appraise REVIEW REVISION in DIRECTORY onto its target."
+  (let ((process-environment
+         (append '("GIT_SEQUENCE_EDITOR=true" "GIT_EDITOR=true")
+                 process-environment)))
+    (apply #'git-appraise-backend--run directory
+           (append '("rebase") (when revision (list revision))))))
+
+;;;###autoload
+(defun git-appraise-rebase-review (revision)
+  "Rebase git-appraise REVISION in the current repository."
+  (interactive
+   (list (git-appraise-backend-select-review)))
+  (unless (yes-or-no-p (format "Rebase review %s onto its target? " revision))
+    (user-error "Rebase cancelled"))
+  (let ((root (git-appraise-backend--root)))
+    (message "Rebasing review %s..." revision)
+    (git-appraise-backend-rebase root revision)
+    (message "Review rebased: %s" revision)))
+
 (provide 'git-appraise-backend)
 ;;; git-appraise-backend.el ends here
