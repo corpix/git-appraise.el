@@ -152,6 +152,40 @@ Return non-nil on success."
               (slot-boundp v 'id)
               (equal (oref v id) id)))))))
 
+(defun git-appraise-comment--update-remote-comment-in-place (buff-name comment-id new-body)
+  "Update remote comment COMMENT-ID in BUFF-NAME with NEW-BODY, in place.
+Return non-nil when the rendered section was updated."
+  (let* ((buf (get-buffer buff-name))
+         (section (and buf (git-appraise-comment--find-section-by-id buff-name comment-id))))
+    (when (and section (buffer-live-p buf))
+      (with-current-buffer buf
+          (let* ((v (oref section value))
+                 (raw-type (oref section type))
+                 (type (if (eq (car-safe raw-type) 'quote) (cadr raw-type) raw-type))
+                 (hunk (git-appraise-comment--hunk-ancestor section)))
+            (when (and (eieio-object-p v)
+                       (memq type '(git-appraise-code-comment-section
+                                    git-appraise-outdated-comment-section))
+                       hunk)
+            (when (slot-exists-p v 'msg) (oset v msg new-body))
+            (when (slot-exists-p v 'body) (oset v body new-body))
+            (let ((inhibit-read-only t)
+                  (start (copy-marker (oref section start)))
+                  (end (copy-marker (oref section end) t))
+                  (parent (oref section parent)))
+              (save-excursion
+                (goto-char start)
+                (set-marker-insertion-type start nil)
+                (set-marker-insertion-type end t)
+                (when parent
+                  (oset parent children (delq section (oref parent children))))
+                (delete-region start end)
+                (goto-char start)
+                (git-appraise-comment--insert-obj-in-hunk hunk v start)
+                (set-marker start nil)
+                (set-marker end nil)
+                t))))))))
+
 (defun git-appraise-comment--insert-reply-in-place (obj buff-name)
   "Insert reply OBJ into BUFF-NAME after its parent comment section.
 Return non-nil on success."
@@ -383,7 +417,26 @@ be found, so callers can rebuild."
                         (git-appraise--build-buffer buff-name)
                         (message "Comment sent")))
                      (_
-                      (message "Comment sent; refresh display to see it")))))))))
+                      (let ((patched (and (buffer-live-p buf)
+                                          (git-appraise-section--mark-comment-sent-in-place
+                                           buff-name
+                                           (or (git-appraise-comment--find-section-by-internal-id
+                                                buff-name
+                                                (and (slot-boundp obj 'internalId)
+                                                     (oref obj internalId)))
+                                               (git-appraise-section--find-section
+                                                buf
+                                                (lambda (s)
+                                                  (and (memq (oref s type)
+                                                             '(git-appraise-local-comment-section
+                                                               git-appraise-reply-comment-section))
+                                                       (eq (oref s value) obj)))))))))
+                        (unless patched
+                          (let ((git-appraise-section-full-refresh? nil)
+                                (git-appraise-comment-cursor-pos cursor-pos))
+                            (when (buffer-live-p buf)
+                              (git-appraise--build-buffer buff-name)))))
+                      (message "Comment sent; local refresh failed")))))))))
       (progn
         (git-appraise-comment--save-draft obj raw-comment)
         (let ((buf (get-buffer buff-name)))

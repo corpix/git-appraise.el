@@ -896,7 +896,7 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
                 (git-appraise-comment-handler-commit
                  comment git-appraise-comment-buffer-msg))
               (should (string-match-p
-                       "refresh display"
+                       "local refresh failed"
                        (string-join (nreverse messages) "\n")))
               (should (= build-calls 0)))
           (fset 'git-appraise-backend--read-review orig-read)
@@ -1312,6 +1312,128 @@ THE SYSTEM SHALL render the comment in place without rebuilding the review buffe
           (should (search-forward "send-flow first hunk" nil t))
           (goto-char (point-min))
           (should (search-forward "send-flow second hunk" nil t)))))))
+
+;;; req-2026-11-25-042:
+;; covers: git-appraise-comment-draft.el git-appraise-section-comment.el
+;; covers-fn: git-appraise-comment--update-remote-comment-in-place
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-042-edit-remote-code-comment-in-place ()
+  "WHEN a remote code comment is edited
+THE SYSTEM SHALL update the rendered comment body in place without rebuilding the review."
+  (git-appraise-comment-inplace-test-with-repo
+    (git-appraise-test--run
+     directory "git-appraise" "comment" "-m" "Original body"
+     "-f" "example.txt" "-l" "2" revision)
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (build-calls 0)
+           (orig-build (symbol-function 'git-appraise--build-buffer))
+           comment-id)
+      (with-current-buffer buf
+        (goto-char (point-min))
+        (should (search-forward "Original" nil t))
+        (magit-map-sections
+         (lambda (s)
+           (when (and (not comment-id)
+                      (memq (oref s type)
+                            '(git-appraise-code-comment-section
+                              git-appraise-outdated-comment-section)))
+             (let ((v (oref s value)))
+               (when (and (slot-boundp v 'id) (oref v id))
+                 (setq comment-id (oref v id)))))))
+        (should comment-id))
+      (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                 (lambda (&rest args)
+                   (cl-incf build-calls)
+                   (apply orig-build args))))
+        (with-current-buffer buf
+          (should (git-appraise-comment--update-remote-comment-in-place
+                   (buffer-name buf) comment-id "Edited body")))
+        (should (= build-calls 0)))
+      (with-current-buffer buf
+        (goto-char (point-min))
+        (should (search-forward "Edited" nil t))
+        (goto-char (point-min))
+        (should-not (search-forward "Original body" nil t))
+        (goto-char (point-min))
+        (should-not (search-forward "Original\nbody" nil t))))))
+
+;;; req-2026-11-25-043:
+;; covers: git-appraise-comment.el git-appraise-comment-draft.el
+;; covers-fn: git-appraise-comment-handler-commit
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-043-edit-remote-comment-no-manual-refresh ()
+  "WHEN a remote comment edit succeeds
+THE SYSTEM SHALL update the review without asking the user to refresh manually."
+  (git-appraise-comment-inplace-test-with-repo
+    (git-appraise-test--run
+     directory "git-appraise" "comment" "-m" "Original body"
+     "-f" "example.txt" "-l" "2" revision)
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (pr (git-appraise-db-get-pullreq))
+           (full-refreshes 0)
+           (orig-build (symbol-function 'git-appraise--build-buffer))
+           comment-id)
+      (with-current-buffer buf
+        (magit-map-sections
+         (lambda (s)
+           (when (and (not comment-id)
+                      (eq (oref s type) 'git-appraise-code-comment-section))
+             (let ((v (oref s value)))
+               (when (and (slot-boundp v 'id) (oref v id))
+                 (setq comment-id (oref v id))))))))
+      (should comment-id)
+      (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                 (lambda (&rest args)
+                   (when git-appraise-section-full-refresh?
+                     (cl-incf full-refreshes))
+                   (apply orig-build args)))
+                ((symbol-function 'git-appraise-update-comment)
+                 (lambda (_pr _kind _id _body callback)
+                   (funcall callback)))
+                ((symbol-function 'git-appraise-backend-refresh-comments)
+                 (lambda (_pr) 'ok)))
+        (let ((obj (git-appraise-editable-remote-comment
+                    :kind "review-comment"
+                    :id comment-id
+                    :body "Original body")))
+          (oset obj msg "Edited body")
+          (git-appraise-comment-handler-commit obj git-appraise-comment-edit-remote-msg)))
+      (should (= full-refreshes 0))
+      (with-current-buffer buf
+        (goto-char (point-min))
+        (should (search-forward "Edited" nil t))
+        (goto-char (point-min))
+        (should-not (search-forward "refresh display" nil t))))))
+
+;;; req-2026-11-25-044:
+;; covers: git-appraise-comment.el
+;; covers-fn: git-appraise-comment--commit-text
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-044-single-comment-no-full-refresh ()
+  "WHEN a single conversation comment is sent
+THE SYSTEM SHALL show it without a full diff reload."
+  (git-appraise-comment-inplace-test-with-repo
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (pr (git-appraise-db-get-pullreq))
+           (full-refreshes 0)
+           (orig-build (symbol-function 'git-appraise--build-buffer)))
+      (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                 (lambda (&rest args)
+                   (when git-appraise-section-full-refresh?
+                     (cl-incf full-refreshes))
+                   (apply orig-build args))))
+        (setq git-appraise-comment-single-comment? t)
+        (unwind-protect
+            (progn
+              (git-appraise-comment--commit-text pr "A single issue comment")
+              (should (= full-refreshes 0))
+              (with-current-buffer buf
+                (goto-char (point-min))
+                (should (re-search-forward "single[[:space:]]+issue[[:space:]]+comment" nil t))))
+          (git-appraise-comment-reset-global-vars))))))
 
 (provide 'git-appraise-comment-inplace-test)
 ;;; git-appraise-comment-inplace-test.el ends here

@@ -443,9 +443,31 @@ comment buffer; the helper header is stripped first."
        pr kind comment-id new-body
        (lambda (&rest _)
          (setq git-appraise-db--pullreq-id pr-id)
-         (pcase (git-appraise-backend-refresh-comments (git-appraise-db-get-pullreq))
-           ('ok (message "Comment edited; refresh display to see it"))
-           (_ (message "Comment edited; refresh display to see it"))))))))
+         (let* ((buf (get-buffer buff-name))
+                (cursor-pos (or (and buf (window-live-p (get-buffer-window buf))
+                                     (window-point (get-buffer-window buf)))
+                                (and buf (with-current-buffer buf (point))))))
+           (pcase (git-appraise-backend-refresh-comments (git-appraise-db-get-pullreq))
+             ('ok
+              (let ((patched (and (buffer-live-p buf)
+                                  (git-appraise-comment--update-remote-comment-in-place
+                                   buff-name comment-id new-body))))
+                (unless patched
+                  (let ((git-appraise-section-full-refresh? nil)
+                        (git-appraise-comment-cursor-pos cursor-pos))
+                    (git-appraise--build-buffer buff-name))))
+              (message "Comment edited"))
+             ('head-changed
+              (let ((git-appraise-section-full-refresh? t)
+                    (git-appraise-comment-cursor-pos cursor-pos))
+                (git-appraise--build-buffer buff-name))
+              (message "Comment edited"))
+             (_
+              (let ((git-appraise-section-full-refresh? nil)
+                    (git-appraise-comment-cursor-pos cursor-pos))
+                (when (buffer-live-p buf)
+                  (git-appraise--build-buffer buff-name)))
+              (message "Comment edited; refresh failed")))))))))
 
 (defun git-appraise-comment--refresh (pr)
   "Refresh PR without depending on the current review's global context."
@@ -493,12 +515,26 @@ comment buffer; the helper header is stripped first."
      git-appraise-comment-uncommitted git-appraise-comment-single-comment-msg)
     (git-appraise-comment-reset-global-vars))
    (git-appraise-comment-single-comment?
-    (let ((msg (git-appraise-utils--comment-clean-msg
-                comment-text git-appraise-comment-single-comment-msg))
-          (callback (lambda (&rest _)
-                      (let ((git-appraise-section-full-refresh? t))
-                        (git-appraise-comment--refresh pr)
-                        (git-appraise-comment-reset-global-vars)))))
+    (let* ((msg (git-appraise-utils--comment-clean-msg
+                 comment-text git-appraise-comment-single-comment-msg))
+           (buff-name (git-appraise-pr-buffer-name pr))
+           (buf (get-buffer buff-name))
+           (cursor-pos (or (and buf (window-live-p (get-buffer-window buf))
+                                (window-point (get-buffer-window buf)))
+                           (and buf (with-current-buffer buf (point)))))
+           (callback (lambda (&rest _)
+                       (let ((git-appraise-db--pullreq-id (oref pr id)))
+                         (pcase (git-appraise-backend-refresh-comments
+                                 (git-appraise-db-get-pullreq))
+                           ('head-changed
+                            (let ((git-appraise-section-full-refresh? t)
+                                  (git-appraise-comment-cursor-pos cursor-pos))
+                              (git-appraise--build-buffer buff-name)))
+                           (_
+                            (let ((git-appraise-section-full-refresh? nil)
+                                  (git-appraise-comment-cursor-pos cursor-pos))
+                              (git-appraise--build-buffer buff-name))))
+                         (git-appraise-comment-reset-global-vars)))))
       (when (string-empty-p msg)
         (user-error "Comment is empty"))
       (git-appraise-new-issue-comment pr msg callback)))
