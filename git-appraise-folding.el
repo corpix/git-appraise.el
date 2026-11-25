@@ -329,7 +329,9 @@ file stays folded after a reload."
   (interactive)
   (let ((file (git-appraise-folding--file-section (magit-current-section))))
     (if file
-        (git-appraise-folding--set-file file (not (oref file hidden)))
+        (let ((folded (not (git-appraise-folding--effective-hidden-p file))))
+          (git-appraise-folding--set-file file folded)
+          (when folded (goto-char (oref file start))))
       (magit-section-cycle-global))))
 
 (provide 'git-appraise-folding)

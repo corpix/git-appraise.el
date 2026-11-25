@@ -180,5 +180,40 @@
             (should (= (caar after) (marker-position (oref file content))))
             (should (= (cadar after) (marker-position (oref file end))))))))))
 
+(defun git-appraise-fold-interactive-e2e-test--first-file-and-hunk ()
+  "Return the first file section and its first real hunk."
+  (let (file)
+    (magit-map-sections
+     (lambda (s)
+       (when (and (not file) (eq (oref s type) 'file))
+         (setq file s)))
+     magit-root-section)
+    (list file (--first (and (magit-hunk-section-p it)
+                           (git-appraise-fold-state--hunk-identity it))
+                        (oref file children)))))
+
+;;; req-2026-11-25-068: file fold from within a hunk
+;; covers: git-appraise-folding.el git-appraise.el
+;; covers-fn: git-appraise-fold-file-at-point
+;; enforcement: test
+(ert-deftest fold-interactive-e2e/req-2026-11-25-068-shift-tab-folds-file ()
+  "WHEN a reviewer folds from within a hunk THE SYSTEM SHALL toggle the containing file and keep the cursor visible."
+  (git-appraise-viewed-e2e-test--with-review
+    (let ((git-appraise-lazy-enabled nil))
+      (git-appraise-fold-interactive-e2e-test--build directory revision))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (pcase-let ((`(,file ,hunk)
+                   (git-appraise-fold-interactive-e2e-test--first-file-and-hunk)))
+        (should hunk)
+        (git-appraise-folding--set-file file nil)
+        (goto-char (oref hunk start))
+        (should (eq (key-binding (kbd "<backtab>"))
+                    #'git-appraise-fold-file-at-point))
+        (call-interactively (key-binding (kbd "<backtab>")))
+        (should (oref file hidden))
+        (should (= (point) (oref file start)))
+        (call-interactively (key-binding (kbd "<backtab>")))
+        (should-not (oref file hidden))))))
+
 (provide 'git-appraise-fold-interactive-e2e-test)
 ;;; git-appraise-fold-interactive-e2e-test.el ends here

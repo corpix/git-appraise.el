@@ -64,6 +64,7 @@ Press `r` for the command menu. The main actions are:
 | Comment editor | `C-c C-k` | Cancel editing |
 | Review buffer | `C-c C-n` / `C-c C-p` | Move between diff hunks |
 | Review buffer | `n` / `p` | Move between visible files and hunks, one heading at a time |
+| Review buffer | `S-TAB` | Toggle the containing file from any hunk |
 | Review buffer | `v` | Toggle the viewed mark on the hunk at point, or the file on a file heading |
 | Review buffer | `V` | Toggle the viewed mark on the whole file |
 | Review buffer | `G` | Reload the review |
