@@ -25,14 +25,11 @@
 
 ;; Phase 30: the diff wash used to be synchronous over the WHOLE raw
 ;; diff, so opening a large PR blocked Emacs.  The file block is the
-;; lazy unit: blocks below `git-appraise-lazy-threshold' wash inline as
-;; before; bigger blocks are replaced by a placeholder file section
-;; (heading with classification tags and change counts, no hunks) whose
-;; raw text is stored on the section.  A deferred chunk queue loads the
-;; placeholders one file per tick after the render, and expanding a
-;; placeholder (TAB) loads it immediately.  Loading runs through
-;; `git-appraise-render--call' so a failed load restores the placeholder
-;; instead of leaving a half-washed file.
+;; lazy unit: every block gets a lightweight file section before the
+;; render returns, so a draft can attach while hunks are loading.  A
+;; deferred queue expands placeholders one file per tick, and TAB
+;; expands a requested file immediately.  A failed expansion restores
+;; its placeholder instead of leaving a half-washed file.
 ;;
 ;; All buffer-locals here are `permanent-local': the deferred render
 ;; tail re-runs the mode body and `kill-all-local-variables' wipes every
@@ -55,13 +52,14 @@
 (declare-function git-appraise-utils--log "git-appraise-utils")
 
 (defcustom git-appraise-lazy-enabled t
-  "When non-nil, wash large file blocks lazily instead of all at once.
-Small blocks always wash inline; see `git-appraise-lazy-threshold'."
+  "When non-nil, show file headings first and load their hunks lazily."
   :group 'git-appraise
   :type 'boolean)
 
 (defcustom git-appraise-lazy-threshold 8192
-  "File blocks larger than this many characters wash lazily."
+  "Compatibility threshold for the legacy diff washer.
+The normal lazy renderer queues every file after creating its heading,
+regardless of this value."
   :group 'git-appraise
   :type 'integer)
 
@@ -226,20 +224,19 @@ Point ends after the inserted section, ready for the next block."
          (spec (list :path path :status status :text text :orig orig)))
     (delete-region beg end)
     (goto-char beg)
-    (setq git-appraise-lazy--queue
-          (nconc git-appraise-lazy--queue
-                 (list (magit-insert-section
-                           (git-appraise-lazy-placeholder-section
-                            spec (git-appraise-fold-state--file-folded-p
-                                  path (or git-appraise-fold-files-by-default
-                                           (git-appraise-section--file-collapse-p
-                                            path info))))
-                         (git-appraise-wash--insert-file-heading
-                          status display path info t)
-                         (magit-insert-heading)
-                         (insert ?\n))))))
-    (git-appraise-section--hide-if-hidden
-     (car (last git-appraise-lazy--queue))))
+    (let ((section
+           (magit-insert-section
+               (git-appraise-lazy-placeholder-section
+                spec (git-appraise-fold-state--file-folded-p
+                      path (or git-appraise-fold-files-by-default
+                               (git-appraise-section--file-collapse-p
+                                path info))))
+             (git-appraise-wash--insert-file-heading
+              status display path info t)
+             (magit-insert-heading)
+             (insert ?\n))))
+      (push section git-appraise-lazy--queue)
+      (git-appraise-section--hide-if-hidden section))))
 
 (defun git-appraise-lazy--wash-all ()
   "Wash the whole diff synchronously (the `git-appraise-lazy-enabled'
@@ -451,21 +448,18 @@ could not apply: the hunks did not exist yet at render time."
                             (git-appraise-lazy--expand-step buffer epoch))))))))
 
 (defun git-appraise-lazy--schedule (commit-focus? fresh-render?)
-  "Queue the deferred wash + chunk loader for this render.
-FRESH-RENDER? is the render's own first-render flag, captured for
-the drain.  Called inside the render's narrowing: capture the wash
-region as markers and hand the per-block work to the deferred
-queue so Emacs can process input between file blocks (the sync
-wash blocked the UI for seconds on medium-file PRs — every block
-under the lazy threshold washed inline in one pass)."
+  "Create file placeholders, then queue their deferred expansion.
+FRESH-RENDER? is the render's own first-render flag.  Materializing
+all file headings before returning gives comments a stable target
+even while the hunks are still loading."
   (setq git-appraise-lazy--commit-focus? commit-focus?
         git-appraise-lazy--review-id git-appraise-db--pullreq-id
         git-appraise-lazy--fresh-render? fresh-render?
         git-appraise-lazy--just-refetched?
         (and (boundp 'git-appraise-section--just-refetched)
              git-appraise-section--just-refetched)
-        git-appraise-lazy--wash-pos (copy-marker (point))
-        git-appraise-lazy--wash-limit (copy-marker (point-max))
+        git-appraise-lazy--wash-pos nil
+        git-appraise-lazy--wash-limit nil
         git-appraise-lazy--insert-parent magit-insert-section--parent
         git-appraise-lazy--end-fixups
         (let ((secs nil)
@@ -475,11 +469,16 @@ under the lazy threshold washed inline in one pass)."
             (setq sec (and (object-of-class-p sec 'magit-section)
                            (ignore-errors (oref sec parent)))))
           secs))
+  (while (progn (skip-chars-forward " \t\r\n") (not (eobp)))
+    (unless (looking-at "^diff --git")
+      (error "Code review stopped before the end of the diff"))
+    (git-appraise-lazy--insert-placeholder))
+  (setq git-appraise-lazy--queue (nreverse git-appraise-lazy--queue))
   (let ((buffer (current-buffer))
         (epoch git-appraise-lazy--epoch))
     (deferred:nextc (deferred:next)
       (lambda (_)
-        (git-appraise-lazy--wash-step buffer epoch)))))
+        (git-appraise-lazy--expand-step buffer epoch)))))
 
 (provide 'git-appraise-lazy)
 ;;; git-appraise-lazy.el ends here

@@ -35,7 +35,12 @@ JSONL snapshot events."
 
 (defun git-appraise-pr-state--repo (pr)
   "Return the git repository directory for PR, or nil."
-  (or (ignore-errors (git-appraise-viewed--repo-dir))
+  (or (let ((owner (and (eieio-object-p pr)
+                        (slot-boundp pr 'owner)
+                        (oref pr owner))))
+        (and (stringp owner) (file-directory-p owner)
+             (file-name-as-directory owner)))
+      (ignore-errors (git-appraise-viewed--repo-dir))
       (let* ((dir (and (boundp 'git-appraise-repo-worktree)
                        (symbol-value 'git-appraise-repo-worktree)))
              (dir (or (and (stringp dir) dir)
@@ -166,21 +171,27 @@ Return the snapshot alist, or nil when no valid state exists."
       (let ((email (string-trim stdout)))
         (unless (string-empty-p email) email)))))
 
-(defun git-appraise-pr-state-persist (pr)
+(defun git-appraise-pr-state-persist (pr &optional signal-errors)
   "Persist unsent local state for PR to git notes.
 No-op when PR/repo/actor are unavailable.  Signals are caught and
-reported as messages so persistence never breaks review flow."
+reported as messages unless SIGNAL-ERRORS is non-nil."
   (condition-case err
       (let ((repo (git-appraise-pr-state--repo pr)))
+        (when (and signal-errors (not repo))
+          (error "Cannot save draft: review repository is unavailable"))
         (when (and repo (eieio-object-p pr))
           (let ((actor (git-appraise-pr-state--actor repo))
                 (anchor (git-appraise-pr-state--anchor repo pr)))
+            (when (and signal-errors (not actor))
+              (error "Cannot save draft: git user.email is unavailable"))
             (when actor
               (git-appraise-metadata-append
                repo git-appraise-pr-state-notes-ref anchor
                (list (git-appraise-pr-state--snapshot pr actor)))))))
     (error
-     (message "pr-state persist failed: %s" (error-message-string err))))
+     (if signal-errors
+         (signal (car err) (cdr err))
+       (message "pr-state persist failed: %s" (error-message-string err)))))
   pr)
 
 (defun git-appraise-pr-state-hydrate (pr)

@@ -28,6 +28,19 @@
 ;;; Repository helpers
 
 (defvar git-appraise-repo-worktree)
+(defvar git-appraise-stage-timing?)
+
+(defun git-appraise-utils--timed (stage action)
+  "Run ACTION and log elapsed time for STAGE when timing is enabled."
+  (let ((started (and (bound-and-true-p git-appraise-stage-timing?)
+                      (float-time))))
+    (unwind-protect
+        (funcall action)
+      (when started
+        (ignore-errors
+          (git-appraise-utils--log
+           "stage-timing"
+           (format "%s: %.3fs" stage (- (float-time) started))))))))
 
 (defun git-appraise-utils--repo-dir ()
   "Return the review worktree or the Git root of `default-directory'."
@@ -291,19 +304,15 @@
 ;;; Log
 
 (defun git-appraise-utils--log (origin msg)
-  "Log MSG from ORIGIN to error file."
-  (with-temp-file git-appraise-log-file
-    (when (not (file-exists-p git-appraise-log-file))
-      (write-file git-appraise-log-file))
-    (insert-file-contents git-appraise-log-file)
-    (goto-char (point-max))
-    (insert ?\n)
-    (insert (current-time-string))
-    (insert " - ")
-    (insert origin)
-    (insert " - ")
-    (insert msg)
-    (insert ?\n)))
+  "Append MSG from ORIGIN to the error log without masking its caller."
+  (condition-case err
+      (with-temp-buffer
+        (insert ?\n (current-time-string) " - " origin " - " msg ?\n)
+        (write-region (point-min) (point-max)
+                      git-appraise-log-file t 'silent))
+    (file-error
+     (message "git-appraise log unavailable: %s"
+              (error-message-string err)))))
 
 ;;; Colors (kept for header rendering)
 

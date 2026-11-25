@@ -95,6 +95,34 @@ For internal usage only.")
   "Review event to submit after feedback is committed.
 For internal usage only.")
 
+(defvar-local git-appraise-comment--session nil
+  "Composer context captured from the review that opened this buffer.")
+(put 'git-appraise-comment--session 'permanent-local t)
+
+(defun git-appraise-comment--capture-session ()
+  "Keep the comment action with this composer across review switches."
+  (setq git-appraise-comment--session
+        (list :cursor git-appraise-comment-cursor-pos
+              :feedback git-appraise-comment-feedback?
+              :title git-appraise-comment-title?
+              :description git-appraise-comment-description?
+              :single git-appraise-comment-single-comment?
+              :target git-appraise-comment-uncommitted
+              :commit-buffer git-appraise-comment-commit-buffer?
+              :send git-appraise-comment-send?
+              :submit git-appraise-comment-pending-submit-event)))
+
+(defun git-appraise-comment--composer-buffer (review-buffer)
+  "Return a composer for REVIEW-BUFFER without replacing another review's."
+  (let ((existing (get-buffer git-appraise-comment-buffer-name)))
+    (if (and existing
+             (buffer-local-value 'git-appraise-comment-review-buffer existing)
+             (not (eq (buffer-local-value
+                       'git-appraise-comment-review-buffer existing)
+                      review-buffer)))
+        (generate-new-buffer git-appraise-comment-buffer-name)
+      (get-buffer-create git-appraise-comment-buffer-name))))
+
 (declare-function git-appraise--submit "git-appraise-actions")
 
 ;; remove free variable warnings
@@ -181,21 +209,22 @@ Returns plist with :side :line and optionally :start-side :start-line."
 (defun git-appraise-comment-add (&optional msg)
   "Add comment.
 Optionally define a MSG."
-  (let ((buffer (get-buffer-create git-appraise-comment-buffer-name))
-        (review-buffer (git-appraise-review-buffer)))
+  (let* ((review-buffer (git-appraise-review-buffer))
+         (buffer (git-appraise-comment--composer-buffer review-buffer)))
     (with-current-buffer buffer
       (erase-buffer)
       (insert (if msg msg git-appraise-comment-buffer-msg))
       (insert ?\n)
       (switch-to-buffer-other-window buffer)
       (git-appraise-comment-mode)
-      (setq git-appraise-comment-review-buffer review-buffer))))
+      (setq git-appraise-comment-review-buffer review-buffer)
+      (git-appraise-comment--capture-session))))
 
 (defun git-appraise-comment-edit ()
   "Edit comment."
   (with-slots (value) (magit-current-section)
-    (let ((buffer (get-buffer-create git-appraise-comment-buffer-name))
-          (review-buffer (git-appraise-review-buffer)))
+    (let* ((review-buffer (git-appraise-review-buffer))
+           (buffer (git-appraise-comment--composer-buffer review-buffer)))
       (with-current-buffer buffer
         (erase-buffer)
         (insert (oref value msg))
@@ -203,7 +232,8 @@ Optionally define a MSG."
         (goto-char (point-min)))
       (switch-to-buffer-other-window buffer)
       (git-appraise-comment-mode)
-      (setq git-appraise-comment-review-buffer review-buffer))))
+      (setq git-appraise-comment-review-buffer review-buffer)
+      (git-appraise-comment--capture-session))))
 
 ;;; handlers ADD or EDIT
 
@@ -450,8 +480,11 @@ comment buffer; the helper header is stripped first."
            (pcase (git-appraise-backend-refresh-comments (git-appraise-db-get-pullreq))
              ('ok
               (let ((patched (and (buffer-live-p buf)
-                                  (git-appraise-comment--update-remote-comment-in-place
-                                   buff-name comment-id new-body))))
+                                  (if (member kind '("issue-comment" "review-summary"))
+                                      (git-appraise-comment--refresh-conversation-in-place
+                                       buff-name)
+                                    (git-appraise-comment--update-remote-comment-in-place
+                                     buff-name comment-id new-body)))))
                 (unless patched
                   (let ((git-appraise-section-full-refresh? nil)
                         (git-appraise-comment-cursor-pos cursor-pos))
@@ -526,14 +559,17 @@ comment buffer; the helper header is stripped first."
                        (let ((git-appraise-db--pullreq-id (oref pr id)))
                          (pcase (git-appraise-backend-refresh-comments
                                  (git-appraise-db-get-pullreq))
+                           ('ok
+                            (unless (git-appraise-comment--refresh-conversation-in-place
+                                     buff-name)
+                              (let ((git-appraise-section-full-refresh? nil)
+                                    (git-appraise-comment-cursor-pos cursor-pos))
+                                (git-appraise--build-buffer buff-name))))
                            ('head-changed
                             (let ((git-appraise-section-full-refresh? t)
                                   (git-appraise-comment-cursor-pos cursor-pos))
                               (git-appraise--build-buffer buff-name)))
-                           (_
-                            (let ((git-appraise-section-full-refresh? nil)
-                                  (git-appraise-comment-cursor-pos cursor-pos))
-                              (git-appraise--build-buffer buff-name))))
+                           (_ (message "Comment sent; local refresh failed")))
                          (git-appraise-comment-reset-global-vars)))))
       (when (string-empty-p msg)
         (user-error "Comment is empty"))
@@ -549,29 +585,47 @@ comment buffer; the helper header is stripped first."
 (defun git-appraise-comment-commit ()
   "Commit to the composer's recorded review, retaining it if saving fails."
   (interactive)
-  (let* ((buffer (get-buffer git-appraise-comment-buffer-name))
+  (let* ((buffer (if (derived-mode-p 'git-appraise-comment-mode)
+                     (current-buffer)
+                   (get-buffer git-appraise-comment-buffer-name)))
          (window (get-buffer-window buffer t))
-         (review-buffer (buffer-local-value 'git-appraise-comment-review-buffer buffer))
-         (git-appraise-db--pullreq-id
-          (if review-buffer
-              (or (and (buffer-live-p review-buffer)
-                       (buffer-local-value 'git-appraise-review-buffer-pr-id review-buffer))
-                  (user-error "Original review is no longer available"))
-            git-appraise-db--pullreq-id))
-         (comment-text (string-trim
-                        (with-current-buffer buffer
-                          (buffer-substring-no-properties (point-min) (point-max)))))
-         (pr (or (git-appraise-db-get-pullreq)
-                 (user-error "Original review is no longer available"))))
-    (git-appraise-comment--commit-text pr comment-text)
-    ;; The handler must persist the draft before the composer disappears.
-    ;; Use the captured buffer/window: rendering can change the selection.
-    (kill-buffer buffer)
-    (when (window-live-p window)
-      (if (= 1 (length (window-list (window-frame window))))
-          (when (> (length (frame-list)) 1)
-            (delete-frame (window-frame window)))
-        (delete-window window)))))
+         (review-buffer (and buffer (buffer-local-value
+                                     'git-appraise-comment-review-buffer buffer)))
+         (session (and buffer (buffer-local-value
+                               'git-appraise-comment--session buffer))))
+    (unless (and buffer session)
+      (user-error "No active comment composer"))
+    (unwind-protect
+        (let* ((git-appraise-comment-cursor-pos (plist-get session :cursor))
+               (git-appraise-comment-feedback? (plist-get session :feedback))
+               (git-appraise-comment-title? (plist-get session :title))
+               (git-appraise-comment-description? (plist-get session :description))
+               (git-appraise-comment-single-comment? (plist-get session :single))
+               (git-appraise-comment-uncommitted (plist-get session :target))
+               (git-appraise-comment-commit-buffer? (plist-get session :commit-buffer))
+               (git-appraise-comment-send? (plist-get session :send))
+               (git-appraise-comment-pending-submit-event (plist-get session :submit))
+               (git-appraise-db--pullreq-id
+                (if review-buffer
+                    (or (and (buffer-live-p review-buffer)
+                             (buffer-local-value 'git-appraise-review-buffer-pr-id
+                                                 review-buffer))
+                        (user-error "Original review is no longer available"))
+                  git-appraise-db--pullreq-id))
+               (comment-text (string-trim
+                              (with-current-buffer buffer
+                                (buffer-substring-no-properties
+                                 (point-min) (point-max)))))
+               (pr (or (git-appraise-db-get-pullreq)
+                       (user-error "Original review is no longer available"))))
+          (git-appraise-comment--commit-text pr comment-text)
+          (kill-buffer buffer)
+          (when (window-live-p window)
+            (if (= 1 (length (window-list (window-frame window))))
+                (when (> (length (frame-list)) 1)
+                  (delete-frame (window-frame window)))
+              (delete-window window))))
+      (git-appraise-comment-reset-global-vars))))
 
 ;;; ----
 
@@ -592,12 +646,15 @@ comment buffer; the helper header is stripped first."
 (defun git-appraise-comment-quit ()
   "Quit the comment window."
   (interactive)
-  (kill-buffer (current-buffer))
-  (if (= 1 (length (window-list (window-frame (selected-window)))))
-      (delete-frame (window-frame (selected-window)))
-    (delete-window (selected-window)))
-  (with-current-buffer (git-appraise-review-buffer)
-    (goto-char git-appraise-comment-cursor-pos)
+  (let ((review-buffer git-appraise-comment-review-buffer)
+        (cursor (plist-get git-appraise-comment--session :cursor)))
+    (kill-buffer (current-buffer))
+    (if (= 1 (length (window-list (window-frame (selected-window)))))
+        (delete-frame (window-frame (selected-window)))
+      (delete-window (selected-window)))
+    (when (buffer-live-p review-buffer)
+      (with-current-buffer review-buffer
+        (when cursor (goto-char cursor))))
     (git-appraise-comment-reset-global-vars)))
 
 (defvar git-appraise-comment-mode-map

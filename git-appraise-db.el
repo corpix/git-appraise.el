@@ -35,6 +35,7 @@
    (saved-at      :initform nil)
    (raw-infos     :initform nil)
    (raw-diff      :initform nil)
+   (diff-tables   :initform nil)
    (raw-comments  :initform nil)
    (owner         :initarg :owner)
    (repo          :initarg :repo)
@@ -129,7 +130,28 @@
   "Save RAW-DIFF to the current pullreq."
   (let ((pullreq (git-appraise-db-get-pullreq)))
     (oset pullreq raw-diff raw-diff)
+    (oset pullreq diff-tables nil)
     (git-appraise-db-update pullreq)))
+
+(defun git-appraise-db--upsert-local-comment (entry previous-id)
+  "Store draft ENTRY, replacing PREVIOUS-ID with one persistent update.
+Restore the in-memory comment list if the durable write fails."
+  (let* ((pr (git-appraise-db-get-pullreq))
+         (old (oref pr raw-comments))
+         (new (if previous-id
+                  (--remove
+                   (--any? (equal (a-get it 'internal-id) previous-id)
+                           (a-get-in it '(comments nodes)))
+                   old)
+                old)))
+    (oset pr raw-comments (append new (list entry)))
+    (condition-case err
+        (when (fboundp 'git-appraise-pr-state-persist)
+          (git-appraise-pr-state-persist pr t))
+      (error
+       (oset pr raw-comments old)
+       (signal (car err) (cdr err))))
+    (git-appraise-db-update pr)))
 
 (defun git-appraise-db--pullreq-raw-infos ()
   "Get raw infos from current pullreq."

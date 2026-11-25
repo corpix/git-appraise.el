@@ -7,6 +7,7 @@
 
 (require 'a)
 (require 'cl-lib)
+(require 'dash)
 (require 'xml)
 (require 'uuidgen)
 (require 'git-appraise-section)
@@ -67,8 +68,101 @@ Sets up the magit section insertion context and absorbs the boundary."
   (let ((magit-insert-section--parent hunk)
         (magit-insert-section--current hunk)
         (magit-insert-section--oldroot magit-root-section))
-    (git-appraise-comment-insert-lines obj)
+    (git-appraise-utils--timed
+     "comment:place-in-hunk"
+     (lambda () (git-appraise-comment-insert-lines obj)))
     (git-appraise-comment--absorb-in-hunk hunk insert-beg (point))))
+
+(defun git-appraise-comment--insert-under-file (file obj)
+  "Insert OBJ under FILE's heading without loading its diff hunks."
+  (let* ((beg (oref file end))
+         (magit-insert-section--parent file)
+         (magit-insert-section--current file)
+         (magit-insert-section--oldroot magit-root-section))
+    (goto-char beg)
+    (git-appraise-utils--timed
+     "comment:place-under-file"
+     (lambda () (git-appraise-comment-insert-lines obj)))
+    (let ((end (point))
+          (parent file))
+      (while parent
+        (when (and (slot-boundp parent 'end)
+                   (markerp (oref parent end))
+                   (<= (oref parent end) beg))
+          (set-marker (oref parent end) end))
+        (setq parent (and (slot-boundp parent 'parent)
+                          (oref parent parent))))
+      (--each (overlays-in (oref file content) end)
+        (when (and (overlay-get it 'invisible)
+                   (= (overlay-end it) beg))
+          (move-overlay it (overlay-start it) end))))))
+
+(defun git-appraise-comment--file-section (buff-name path)
+  "Find the visible file section for PATH in BUFF-NAME."
+  (git-appraise-section--find-section
+   buff-name
+   (lambda (s)
+     (or (and (git-appraise-lazy-placeholder-section-p s)
+              (equal (plist-get (oref s value) :path) path))
+         (and (eq (oref s type) 'file)
+              (stringp (oref s value))
+              (equal (git-appraise-diff--strip-path (oref s value))
+                     path))))))
+
+(defun git-appraise-comment--refresh-conversation-in-place (buff-name)
+  "Rebuild only the Conversation section in BUFF-NAME.
+Return non-nil if it was replaced.  The diff tree and lazy queue stay
+untouched; preserve the heading's current fold state."
+  (let* ((buf (get-buffer buff-name))
+         (old (and buf
+                   (git-appraise-section--find-section
+                    buf (lambda (s)
+                          (eq (oref s type)
+                              'git-appraise-comment-header-section))))))
+    (when (and old (buffer-live-p buf))
+      (with-current-buffer buf
+        (let* ((inhibit-read-only t)
+               (parent (oref old parent))
+               (siblings (copy-sequence (oref parent children)))
+               (beg (copy-marker (oref old start)))
+               (old-beg (copy-marker (oref old start) t))
+               (end (copy-marker (oref old end) t))
+               (hidden (oref old hidden))
+               (git-appraise-db--pullreq-id
+                (or git-appraise-review-buffer-pr-id
+                    git-appraise-db--pullreq-id))
+               (magit-insert-section--parent parent)
+               (magit-insert-section--current parent)
+               (magit-insert-section--oldroot magit-root-section)
+               new)
+          (save-excursion
+            (goto-char beg)
+            (unwind-protect
+                (condition-case err
+                    (progn
+                      ;; Build the replacement before deleting the old tree.
+                      ;; A renderer error can then discard only the new text.
+                      (git-appraise-utils--timed
+                       "comment:refresh-conversation"
+                       (lambda ()
+                         (git-appraise-section-insert-top-level-comments)))
+                      (setq new (car (last (oref parent children))))
+                      (unless (and new (not (eq new old)))
+                        (error "Conversation section was not inserted"))
+                      (if hidden
+                          (magit-section-hide new)
+                        (magit-section-show new))
+                      (delete-region old-beg end)
+                      (oset parent children
+                            (--map (if (eq it old) new it) siblings))
+                      new)
+                  (error
+                   (delete-region beg old-beg)
+                   (oset parent children siblings)
+                   (signal (car err) (cdr err))))
+              (set-marker beg nil)
+              (set-marker old-beg nil)
+              (set-marker end nil))))))))
 
 (defun git-appraise-comment--save-draft (obj entry)
   "Persist OBJ's draft ENTRY, replacing an earlier save atomically.
@@ -79,9 +173,9 @@ duplicate the comment."
          (id (or previous (a-get node 'internal-id)))
          (entry (a-assoc-in entry '(comments nodes)
                             (list (a-assoc node 'internal-id id)))))
-    (when previous
-      (git-appraise-db-delete-raw-comment previous))
-    (git-appraise-db--pullreq-raw-comments-update entry)
+    (git-appraise-utils--timed
+     "comment:persist-draft"
+     (lambda () (git-appraise-db--upsert-local-comment entry previous)))
     (oset obj internalId id)))
 
 (defun git-appraise-comment--goto-saved-comment (obj &optional buff-name)
@@ -135,7 +229,9 @@ Return non-nil on success."
               (oset parent children (delq section (oref parent children))))
             (delete-region start end)
             (goto-char start)
-            (git-appraise-comment--insert-obj-in-hunk hunk obj start)
+            (if hunk
+                (git-appraise-comment--insert-obj-in-hunk hunk obj start)
+              (git-appraise-comment--insert-under-file parent obj))
             (set-marker start nil)
             (set-marker end nil)
             t))))))
@@ -215,14 +311,9 @@ be found, so callers can rebuild."
             (goto-char pos)
             (let* ((section (magit-current-section))
                    (hunk (git-appraise-comment--hunk-ancestor section))
-                   (expanded nil))
-              ;; If cursor is on a lazy placeholder, expand it first.
-              (when (and (not hunk)
-                         (git-appraise-lazy-placeholder-section-p section))
-                (setq section (git-appraise-lazy--expand-at section))
-                (setq expanded t)
-                (setq hunk (and section
-                                (git-appraise-comment--hunk-ancestor section))))
+                   (placeholder (and (not hunk)
+                                     (git-appraise-comment--file-section
+                                      buff-name (oref obj path)))))
               (cond
                (hunk
                 (goto-char pos)
@@ -235,23 +326,9 @@ be found, so callers can rebuild."
                               (progn (goto-char (oref s end)) t))))
                 (git-appraise-comment--insert-obj-in-hunk hunk obj (point))
                 t)
-               ;; FILE-level comment: expansion washes it in via the
-               ;; missing-comment pass, so no hunk insertion is needed.
-               ((and expanded
-                     (string-equal (or (oref obj line-type) "") "FILE"))
+               (placeholder
+                (git-appraise-comment--insert-under-file placeholder obj)
                 t)
-               ((string-equal (or (oref obj line-type) "") "FILE")
-                (let* ((path (oref obj path))
-                       (placeholder
-                        (git-appraise-section--find-section
-                         buff-name
-                         (lambda (s)
-                           (and (git-appraise-lazy-placeholder-section-p s)
-                                (equal (plist-get (oref s value) :path) path))))))
-                  (when placeholder
-                    (with-current-buffer buf
-                      (git-appraise-lazy--expand-at placeholder))
-                    t)))
                (t nil)))))))))
 
 (cl-defmethod git-appraise-comment-handler-commit ((obj git-appraise-reply-comment-section) default-buff-msg)
@@ -393,19 +470,22 @@ be found, so callers can rebuild."
                      ('ok
                       (let ((patched
                              (and (buffer-live-p buf)
-                                  (git-appraise-section--mark-comment-sent-in-place
-                                   buff-name
-                                   (or (git-appraise-comment--find-section-by-internal-id
-                                        buff-name
-                                        (and (slot-boundp obj 'internalId)
-                                             (oref obj internalId)))
-                                       (git-appraise-section--find-section
-                                        buf
-                                        (lambda (s)
-                                          (and (memq (oref s type)
-                                                     '(git-appraise-local-comment-section
-                                                       git-appraise-reply-comment-section))
-                                               (eq (oref s value) obj)))))))))
+                                  (or (and (equal (oref obj line-type) "FILE")
+                                           (git-appraise-comment--refresh-conversation-in-place
+                                            buff-name))
+                                      (git-appraise-section--mark-comment-sent-in-place
+                                       buff-name
+                                       (or (git-appraise-comment--find-section-by-internal-id
+                                            buff-name
+                                            (and (slot-boundp obj 'internalId)
+                                                 (oref obj internalId)))
+                                           (git-appraise-section--find-section
+                                            buf
+                                            (lambda (s)
+                                              (and (memq (oref s type)
+                                                         '(git-appraise-local-comment-section
+                                                           git-appraise-reply-comment-section))
+                                                   (eq (oref s value) obj))))))))))
                         (unless patched
                           (let ((git-appraise-section-full-refresh? nil)
                                 (git-appraise-comment-cursor-pos cursor-pos))
@@ -460,19 +540,6 @@ be found, so callers can rebuild."
               (let ((git-appraise-section-full-refresh? nil))
                 (git-appraise--build-buffer buff-name))
               (git-appraise-comment--goto-saved-comment obj buff-name)))
-          ;; Lazy wash can delay missing-comment insertion; drain so a
-          ;; just-saved draft is visible immediately.
-          (when (and buf (buffer-live-p buf))
-            (with-current-buffer buf
-              (when (or git-appraise-lazy--wash-pos git-appraise-lazy--queue
-                        (bound-and-true-p deferred:queue))
-                (let ((deadline (+ (float-time) 30)))
-                  (catch 'git-appraise-lazy-drain-timeout
-                    (while (or git-appraise-lazy--wash-pos git-appraise-lazy--queue
-                               (bound-and-true-p deferred:queue))
-                      (when (> (float-time) deadline)
-                        (throw 'git-appraise-lazy-drain-timeout nil))
-                      (sit-for 0.05)))))))
           (git-appraise-comment--goto-saved-comment obj buff-name))))))
 
 (provide 'git-appraise-comment-draft)

@@ -1435,5 +1435,57 @@ THE SYSTEM SHALL show it without a full diff reload."
                 (should (re-search-forward "single[[:space:]]+issue[[:space:]]+comment" nil t))))
           (git-appraise-comment-reset-global-vars))))))
 
+;;; req-2026-11-25-045: draft save does not drain unrelated files
+;; covers: git-appraise-lazy.el git-appraise-comment-draft.el
+;; covers-fn: git-appraise-lazy--schedule, git-appraise-comment-handler-commit
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-045-save-during-lazy-render ()
+  "WHEN a reviewer saves a draft while files are still loading
+THE SYSTEM SHALL show it immediately and keep unrelated rendering in the background."
+  (git-appraise-comment-inplace-test-with-repo
+    (let ((git-appraise-history-enabled nil)
+          (git-appraise-lazy-enabled t))
+      (git-appraise-backend-open revision)
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer)))
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (builds 0)
+           (expanded 0)
+           (original-expand (symbol-function 'git-appraise-lazy--expand-at)))
+      (with-current-buffer buf
+        (let ((placeholder
+               (git-appraise-comment--file-section
+                (buffer-name buf) "example.txt")))
+          (should (git-appraise-lazy-placeholder-section-p placeholder))
+          (should git-appraise-lazy--queue)
+          (setq git-appraise-comment-cursor-pos (oref placeholder start)
+                git-appraise-comment-commit-buffer? nil)
+          (let ((comment (git-appraise-local-comment-section
+                          :state "LOCAL COMMENT" :author "Tester"
+                          :path "example.txt" :side "RIGHT" :line 2
+                          :line-type "ADDED" :send? nil
+                          :msg "pending file draft")))
+            (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                       (lambda (&rest _) (cl-incf builds)))
+                      ((symbol-function 'git-appraise-lazy--expand-at)
+                       (lambda (section)
+                         (cl-incf expanded)
+                         (funcall original-expand section))))
+              (git-appraise-comment-handler-commit
+               comment git-appraise-comment-buffer-msg))
+            (should (= builds 0))
+            (should (= expanded 0))
+            (should git-appraise-lazy--queue)
+            (should (string-match-p "pending file draft" (buffer-string)))
+            (should (eq (oref (git-appraise-comment--find-section-by-internal-id
+                               (buffer-name buf) (oref comment internalId)) parent)
+                        placeholder))
+            (git-appraise-test--drain-lazy buf)
+            (should (= 1 (how-many "pending file draft"
+                                    (point-min) (point-max))))
+            (should (git-appraise-comment--hunk-ancestor
+                     (git-appraise-comment--find-section-by-internal-id
+                      (buffer-name buf) (oref comment internalId))))))))))
+
 (provide 'git-appraise-comment-inplace-test)
 ;;; git-appraise-comment-inplace-test.el ends here

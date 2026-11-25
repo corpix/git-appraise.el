@@ -150,8 +150,9 @@
   (interactive)
   (when (git-appraise-db-local-pr-p)
     (user-error "Local diff reviews are read-only"))
-  (let ((buffer (get-buffer-create git-appraise-comment-buffer-name))
-        (pr (git-appraise-db-get-pullreq)))
+  (let* ((review-buffer (git-appraise-review-buffer))
+         (buffer (git-appraise-comment--composer-buffer review-buffer))
+         (pr (git-appraise-db-get-pullreq)))
     (setq git-appraise-comment-feedback? t)
     (setq git-appraise-comment-cursor-pos (point))
     (with-current-buffer buffer
@@ -159,7 +160,9 @@
       (insert (or (oref pr feedback) git-appraise-comment-feedback-msg))
       (insert ?\n)
       (switch-to-buffer-other-window buffer)
-      (git-appraise-comment-mode))))
+      (git-appraise-comment-mode)
+      (setq git-appraise-comment-review-buffer review-buffer)
+      (git-appraise-comment--capture-session))))
 
 ;;;###autoload
 (defun git-appraise--submit (event &optional feedback only-reply?)

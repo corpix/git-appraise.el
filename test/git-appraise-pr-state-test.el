@@ -61,5 +61,39 @@
           (should (equal (a-get node 'internal-id) "draft-1"))
           (should (equal (a-get node 'bodyText) "draft body")))))))
 
+;;; req-2026-11-25-046: draft edits persist as one recoverable change
+;; covers: git-appraise-db.el git-appraise-pr-state.el
+;; covers-fn: git-appraise-db--upsert-local-comment, git-appraise-pr-state-persist
+;; enforcement: test
+(ert-deftest pr-state/req-2026-11-25-046-draft-edit-is-atomic ()
+  "WHEN a reviewer edits a draft THE SYSTEM SHALL persist one replacement and keep the previous draft if saving fails."
+  (git-appraise-test--with-git-repo
+    (let* ((pr (git-appraise-db--pullreq-create
+                (git-appraise-backend-repo
+                 :id "test-pr-edit" :owner default-directory
+                 :repo "repo" :number "abc123")))
+           (old '((state . "LOCAL COMMENT")
+                  (comments (nodes ((internal-id . "draft-1")
+                                    (bodyText . "before")
+                                    (path . "f.txt"))))))
+           (new '((state . "LOCAL COMMENT")
+                  (comments (nodes ((internal-id . "draft-1")
+                                    (bodyText . "after")
+                                    (path . "f.txt"))))))
+           (writes 0)
+           (persist (symbol-function 'git-appraise-pr-state-persist)))
+      (git-appraise-db--pullreq-raw-comments-update old)
+      (cl-letf (((symbol-function 'git-appraise-pr-state-persist)
+                 (lambda (obj &optional strict)
+                   (cl-incf writes)
+                   (funcall persist obj strict))))
+        (git-appraise-db--upsert-local-comment new "draft-1"))
+      (should (= writes 1))
+      (should (equal (oref pr raw-comments) (list new)))
+      (cl-letf (((symbol-function 'git-appraise-pr-state-persist)
+                 (lambda (&rest _) (error "note write failed"))))
+        (should-error (git-appraise-db--upsert-local-comment old "draft-1")))
+      (should (equal (oref pr raw-comments) (list new))))))
+
 (provide 'git-appraise-pr-state-test)
 ;;; git-appraise-pr-state-test.el ends here
