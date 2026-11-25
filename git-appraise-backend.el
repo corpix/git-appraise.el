@@ -71,6 +71,68 @@
                             (string-trim (buffer-string)))))))
       (kill-buffer output))))
 
+(defun git-appraise-backend--run-parallel (directory commands)
+  "Run COMMANDS in parallel in DIRECTORY.
+COMMANDS is a list of (TAG PROGRAM . ARGS).  Return an alist of
+(TAG . OUTPUT).  Signal `user-error' with the first failure,
+matching the single-command helpers."
+  (dolist (cmd commands)
+    (let ((program (nth 1 cmd)))
+      (when (and (stringp program)
+                 (string= (file-name-nondirectory program) "git-appraise")
+                 (not (executable-find "git-appraise")))
+        (user-error "git-appraise is not installed or is absent from PATH"))))
+  (let ((default-directory (file-name-as-directory directory))
+        (procs nil))
+    (unwind-protect
+        (progn
+          (dolist (cmd commands)
+            (let* ((tag (nth 0 cmd))
+                   (program (nth 1 cmd))
+                   (args (cddr cmd))
+                   (buf (generate-new-buffer (format " *ga-par-%s*" tag)))
+                   (err-buf (generate-new-buffer (format " *ga-par-%s-err*" tag)))
+                   (proc (make-process
+                          :name (format "ga-par-%s" tag)
+                          :buffer buf
+                          :stderr err-buf
+                          :command (cons program args)
+                          :noquery t
+                          :sentinel #'ignore)))
+              (push (list tag program args proc buf err-buf) procs)))
+          (let ((pending procs))
+            (while pending
+              (accept-process-output nil 0.1)
+              (let (live)
+                (dolist (p pending)
+                  (when (process-live-p (nth 3 p))
+                    (push p live)))
+                (setq pending (nreverse live)))))
+          (let (results)
+            (dolist (p (nreverse procs))
+              (pcase-let ((`(,tag ,program ,args ,proc ,buf ,err-buf) p))
+                (let ((status (process-exit-status proc)))
+                  (unless (and (integerp status) (zerop status))
+                    (let ((err (with-current-buffer err-buf
+                                 (string-trim (buffer-string))))
+                          (out (with-current-buffer buf
+                                 (string-trim (buffer-string)))))
+                      (user-error "%s %s failed: %s"
+                                  (file-name-nondirectory program)
+                                  (car args)
+                                  (if (string-empty-p err) out err)))))
+                (push (cons tag (with-current-buffer buf (buffer-string)))
+                      results)))
+            (nreverse results)))
+      (dolist (p procs)
+        (let ((proc (nth 3 p))
+              (buf (nth 4 p))
+              (err-buf (nth 5 p)))
+          (when (process-live-p proc)
+            (delete-process proc))
+          (when (buffer-live-p buf) (kill-buffer buf))
+          (when (buffer-live-p err-buf) (kill-buffer err-buf)))))))
+
 (defun git-appraise-backend--git (directory &rest args)
   "Run Git with ARGS in DIRECTORY and return its trimmed output."
   (let ((default-directory (file-name-as-directory directory)))
@@ -425,7 +487,8 @@ Return a pair of normalized infos and inline comments."
          (description (or (a-get request 'description) ""))
          (title (or (car (split-string description "\n" t))
                     (substring revision 0 (min 12 (length revision)))))
-         (tables (git-appraise-backend--diff-tables diff))
+         (tables (and (a-get review 'comments)
+                      (git-appraise-backend--diff-tables diff)))
          (inline nil)
          (historical nil)
          (conversation nil))
@@ -500,17 +563,22 @@ Return a pair of normalized infos and inline comments."
        (comments (nodes . ,(nreverse conversation))))
      (nreverse inline))))
 
+(defun git-appraise-backend--validate-review (review revision)
+  "Validate parsed REVIEW for REVISION.  Return REVIEW or signal `user-error'."
+  (unless (and (listp review)
+               (equal (a-get review 'revision) revision)
+               (listp (a-get review 'request)))
+    (user-error "Invalid git-appraise review for %s" revision))
+  review)
+
 (defun git-appraise-backend--read-review (directory revision)
   "Read and validate REVIEW's show -json for REVISION in DIRECTORY.
 Signal `user-error' when the review data is unusable."
-  (let ((review (git-appraise-backend--json
-                 (git-appraise-backend--run directory "show" "-json" revision)
-                 "show")))
-    (unless (and (listp review)
-                 (equal (a-get review 'revision) revision)
-                 (listp (a-get review 'request)))
-      (user-error "Invalid git-appraise review for %s" revision))
-    review))
+  (git-appraise-backend--validate-review
+   (git-appraise-backend--json
+    (git-appraise-backend--run directory "show" "-json" revision)
+    "show")
+   revision))
 
 (defun git-appraise-backend-refresh (obj buffer-name &optional message)
   "Reload OBJ from Git and render BUFFER-NAME, optionally showing MESSAGE."
@@ -518,32 +586,38 @@ Signal `user-error' when the review data is unusable."
          (revision (oref obj number))
          (old-head (oref obj sha))
          (old-comments (oref obj raw-comments))
-         (review (git-appraise-backend--read-review directory revision)))
-    (let* ((diff (git-appraise-utils--clean-diff-prefixes
-                  (git-appraise-backend--run directory "show" "-diff" revision)))
-           (head (git-appraise-backend--head directory review))
-           (normalized
-            (condition-case err
-                (git-appraise-backend--normalize review diff head)
-              (error (user-error "Invalid git-appraise review data: %s"
-                                 (error-message-string err))))))
-      (git-appraise-db--pullreq-raw-diff-update diff)
-      (setf (alist-get 'commits (car normalized))
-            `((nodes . ,(git-appraise-backend--commits directory review head))))
-      (git-appraise-db--pullreq-raw-infos-update (car normalized))
-      (let ((current (git-appraise-db-get-pullreq)))
-        (oset current raw-comments
-              (git-appraise-db--reconcile-raw-comments
-               (cdr normalized) old-comments))
-        (git-appraise-db-update current)
-        (when (fboundp 'git-appraise-pr-state-persist)
-          (git-appraise-pr-state-persist current)))
-      ;; personal viewed state lives in a git notes ref anchored on
-      ;; the review revision: re-read it so the render projects the
-      ;; freshest note.  Read failures are logged inside and never
-      ;; fatal; this is not a provider error.
-      (git-appraise-viewed--refresh directory revision)
-      (git-appraise--trigger-hooks buffer-name nil message))))
+         (fetched (git-appraise-backend--run-parallel
+                   directory
+                   `((json "git-appraise" "show" "-json" ,revision)
+                     (diff "git-appraise" "show" "-diff" ,revision))))
+         (review (git-appraise-backend--validate-review
+                  (git-appraise-backend--json (alist-get 'json fetched) "show")
+                  revision))
+         (diff (git-appraise-utils--clean-diff-prefixes
+                (alist-get 'diff fetched)))
+         (head (git-appraise-backend--head directory review))
+         (normalized
+          (condition-case err
+              (git-appraise-backend--normalize review diff head)
+            (error (user-error "Invalid git-appraise review data: %s"
+                               (error-message-string err))))))
+    (git-appraise-db--pullreq-raw-diff-update diff)
+    (setf (alist-get 'commits (car normalized))
+          `((nodes . ,(git-appraise-backend--commits directory review head))))
+    (git-appraise-db--pullreq-raw-infos-update (car normalized))
+    (let ((current (git-appraise-db-get-pullreq)))
+      (oset current raw-comments
+            (git-appraise-db--reconcile-raw-comments
+             (cdr normalized) old-comments))
+      (git-appraise-db-update current)
+      (when (fboundp 'git-appraise-pr-state-persist)
+        (git-appraise-pr-state-persist current)))
+    ;; personal viewed state lives in a git notes ref anchored on
+    ;; the review revision: re-read it so the render projects the
+    ;; freshest note.  Read failures are logged inside and never
+    ;; fatal; this is not a provider error.
+    (git-appraise-viewed--refresh directory revision)
+    (git-appraise--trigger-hooks buffer-name nil message)))
 
 (defun git-appraise-backend-refresh-comments (obj)
   "Refresh only the conversation metadata of the review OBJ.
