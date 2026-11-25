@@ -1145,5 +1145,173 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
           (should (eieio-object-p (oref sec value)))
           (should (equal (oref (oref sec value) id) 101)))))))
 
+(defun git-appraise-comment-inplace-test--commentable-hunk-lines (buf)
+  "Return (POS SIDE LINE LINE-TYPE PATH) for commentable hunk lines in BUF."
+  (with-current-buffer buf
+    (let (items)
+      (magit-map-sections
+       (lambda (sec)
+         (when (magit-hunk-section-p sec)
+           (let* ((file (oref sec parent))
+                  (path (and (magit-file-section-p file)
+                             (oref file value)))
+                  (beg (oref sec start))
+                  (end (oref sec end)))
+             (save-excursion
+               (goto-char beg)
+               (while (< (point) end)
+                 (let* ((line (buffer-substring-no-properties
+                               (line-beginning-position)
+                               (line-end-position)))
+                        (prefix (and (> (length line) 0) (aref line 0)))
+                        (line-type (pcase prefix
+                                     (?+ "ADDED")
+                                     (?- "REMOVED")
+                                     (?  "UNCHANGED")
+                                     (_ nil))))
+                   (when (and line-type path)
+                     (save-excursion
+                       (goto-char (line-beginning-position))
+                       (let* ((loc (git-appraise--compute-line-side-and-range))
+                              (side (plist-get loc :side))
+                              (num (plist-get loc :line)))
+                         (when (and side num)
+                           (push (list (line-beginning-position) side num line-type path line)
+                                 items))))))
+                 (forward-line 1))))))
+       magit-root-section)
+      (nreverse items))))
+
+;;; req-2026-11-25-040:
+;; covers: git-appraise-comment-draft.el git-appraise-comment.el git-appraise-section-comment.el
+;; covers-fn: git-appraise-comment-handler-commit, git-appraise-comment--insert-local-comment-in-place, git-appraise-comment-add-or-edit
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-040-dynamic-add-no-reload-many-positions ()
+  "WHEN a reviewer adds draft comments dynamically at various hunk positions
+THE SYSTEM SHALL insert each comment in place without rebuilding or reloading the review."
+  (git-appraise-comment-inplace-test-with-repo
+    ;; Build a clean multi-hunk, multi-file review for corner-case coverage.
+    (git-appraise-test--run directory "git" "checkout" "-q" "master")
+    (with-temp-file (expand-file-name "example.txt" directory)
+      (insert "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\n"))
+    (with-temp-file (expand-file-name "other.txt" directory)
+      (insert "a\nb\nc\n"))
+    (git-appraise-test--run directory "git" "add" ".")
+    (git-appraise-test--run directory "git" "commit" "-qm" "base2")
+    (git-appraise-test--run directory "git" "checkout" "-qb" "feature2")
+    (with-temp-file (expand-file-name "example.txt" directory)
+      (insert "l1\nL2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nl12\n"))
+    (with-temp-file (expand-file-name "other.txt" directory)
+      (insert "a\nB\nc\nD\n"))
+    (git-appraise-test--run directory "git" "commit" "-qam" "change2")
+    (setq revision (git-appraise-test--run directory "git" "rev-parse" "HEAD"))
+    (git-appraise-test--run
+     directory "git-appraise" "request" "-quiet" "-m" "Multi hunk" "-target" "refs/heads/master")
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (lines (git-appraise-comment-inplace-test--commentable-hunk-lines buf))
+           (build-calls 0)
+           (full-refreshes 0)
+           (orig-build (symbol-function 'git-appraise--build-buffer)))
+      (should (> (length lines) 5))
+      (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                 (lambda (&rest args)
+                   (cl-incf build-calls)
+                   (when git-appraise-section-full-refresh?
+                     (cl-incf full-refreshes))
+                   (apply orig-build args)))
+                ((symbol-function 'git-appraise-comment-add)
+                 (lambda (&optional _msg) nil))
+                ((symbol-function 'switch-to-buffer-other-window)
+                 (lambda (buf &rest _) (set-buffer buf))))
+        (dolist (item (reverse lines))
+          (pcase-let ((`(,pos ,side ,num ,line-type ,path ,_text) item))
+            (with-current-buffer buf
+              (goto-char pos)
+              (setq git-appraise-comment-cursor-pos pos
+                    git-appraise-comment-commit-buffer? nil
+                    git-appraise-comment-send? nil)
+              ;; Dynamic add: create comment through the same shape the UI produces.
+              (let ((comment (git-appraise-local-comment-section
+                              :state "LOCAL COMMENT"
+                              :author "Tester"
+                              :path path
+                              :side side
+                              :line num
+                              :line-type line-type
+                              :send? nil
+                              :msg (format "dyn %s:%s:%s" path num line-type))))
+                (setq git-appraise-comment-uncommitted comment)
+                (git-appraise-comment-handler-commit
+                 comment git-appraise-comment-buffer-msg)))))
+        (should (= build-calls 0))
+        (should (= full-refreshes 0)))
+      (with-current-buffer buf
+        (dolist (item lines)
+          (pcase-let ((`(,_pos ,_side ,num ,line-type ,path ,_text) item))
+            (goto-char (point-min))
+            (should (search-forward (format "dyn %s:%s:%s" path num line-type) nil t))))))))
+
+;;; req-2026-11-25-041:
+;; covers: git-appraise-comment-draft.el git-appraise-comment.el git-appraise-section.el
+;; covers-fn: git-appraise-comment-handler-commit, git-appraise-comment-add-or-edit, git-appraise-comment-commit, git-appraise-section--mark-comment-sent-in-place
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-041-send-flow-no-reload-multi-hunk ()
+  "WHEN a reviewer adds an immediately-sent comment through the real UI flow in a multi-hunk file
+THE SYSTEM SHALL render the comment in place without rebuilding the review buffer."
+  (git-appraise-comment-inplace-test-with-repo
+    (git-appraise-test--run directory "git" "checkout" "-q" "master")
+    (with-temp-file (expand-file-name "example.txt" directory)
+      (insert "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\nl11\nl12\n"))
+    (git-appraise-test--run directory "git" "add" ".")
+    (git-appraise-test--run directory "git" "commit" "-qm" "base-mh")
+    (git-appraise-test--run directory "git" "checkout" "-qb" "feature-mh")
+    (with-temp-file (expand-file-name "example.txt" directory)
+      (insert "l1\nL2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nl12\n"))
+    (git-appraise-test--run directory "git" "commit" "-qam" "change-mh")
+    (setq revision (git-appraise-test--run directory "git" "rev-parse" "HEAD"))
+    (git-appraise-test--run
+     directory "git-appraise" "request" "-quiet" "-m" "Two hunks" "-target" "refs/heads/master")
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (build-calls 0)
+           (full-refreshes 0)
+           (orig-build (symbol-function 'git-appraise--build-buffer)))
+      (cl-letf (((symbol-function 'git-appraise--build-buffer)
+                 (lambda (&rest args)
+                   (cl-incf build-calls)
+                   (when git-appraise-section-full-refresh?
+                     (cl-incf full-refreshes))
+                   (apply orig-build args)))
+                ((symbol-function 'switch-to-buffer-other-window)
+                 (lambda (b &rest _) (set-buffer b)))
+                ((symbol-function 'delete-window) #'ignore)
+                ((symbol-function 'delete-frame) #'ignore))
+        ;; Comment in middle of first hunk - the reported reload case.
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (re-search-forward "^ l4" nil t)
+          (git-appraise-comment-add-or-edit))
+        (with-current-buffer (get-buffer git-appraise-comment-buffer-name)
+          (erase-buffer)
+          (insert "send-flow first hunk"))
+        (git-appraise-comment-commit)
+        ;; Comment in second hunk to cover multiple positions.
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (re-search-forward "^+L10" nil t)
+          (git-appraise-comment-add-or-edit))
+        (with-current-buffer (get-buffer git-appraise-comment-buffer-name)
+          (erase-buffer)
+          (insert "send-flow second hunk"))
+        (git-appraise-comment-commit)
+        (should (= build-calls 0))
+        (should (= full-refreshes 0))
+        (with-current-buffer buf
+          (goto-char (point-min))
+          (should (search-forward "send-flow first hunk" nil t))
+          (goto-char (point-min))
+          (should (search-forward "send-flow second hunk" nil t)))))))
+
 (provide 'git-appraise-comment-inplace-test)
 ;;; git-appraise-comment-inplace-test.el ends here

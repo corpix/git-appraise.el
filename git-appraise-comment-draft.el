@@ -322,66 +322,68 @@ be found, so callers can rebuild."
           (when (git-appraise-backend-repo-p (git-appraise-db-get-pullreq))
             (git-appraise-comment--save-draft obj raw-comment)
             (setq draft-id (oref obj internalId)))
-          (git-appraise-new-code-comment
-           (git-appraise-db-get-pullreq)
-           obj
-           (lambda (&rest _)
-             (let ((git-appraise-db--pullreq-id pr-id))
-               (when draft-id
-                 (git-appraise-db-delete-raw-comment draft-id))
-               ;; async callback: mark THIS comment sent in place — no
-               ;; full re-render, no re-fetch
-               (let* ((buf (get-buffer buff-name))
-                      (section (and buf
-                                    (git-appraise-section--find-section
-                                     buf
-                                     (lambda (s)
-                                       (and (memq (oref s type)
-                                                  '(git-appraise-local-comment-section
-                                                    git-appraise-reply-comment-section))
-                                           (eq (oref s value) obj)))))))
-                 (if (and section
-                          (git-appraise-section--mark-comment-sent-in-place
-                           buff-name section))
-                     (message "Comment sent")
-                   ;; no rendered draft section: an immediately sent
-                   ;; file-level comment.  Read the canonical comment
-                   ;; set once and re-render locally from the cached
-                   ;; diff: no `show -diff', no second CLI call, no
-                   ;; `Load review...'.
-                   (let ((cursor-pos (or (and buf (window-live-p (get-buffer-window buf))
-                                                (window-point (get-buffer-window buf)))
-                                           (and buf (with-current-buffer buf (point)))
-                                           git-appraise-comment-cursor-pos)))
-                     (pcase (git-appraise-backend-refresh-comments
-                             (git-appraise-db-get-pullreq))
-                       ('ok
-                        ;; DB refreshed; avoid a full diff rebuild.
-                        ;; Patch the draft section in place when present;
-                        ;; otherwise do a non-full rebuild (no diff reload).
-                        (let ((patched
-                               (and (buffer-live-p buf)
-                                    (git-appraise-section--mark-comment-sent-in-place
-                                     buff-name
-                                     (git-appraise-section--find-section
-                                      buf
-                                      (lambda (s)
-                                        (and (memq (oref s type)
-                                                   '(git-appraise-local-comment-section
-                                                     git-appraise-reply-comment-section))
-                                             (eq (oref s value) obj))))))))
-                          (unless patched
-                            (let ((git-appraise-section-full-refresh? nil)
-                                  (git-appraise-comment-cursor-pos cursor-pos))
-                              (git-appraise--build-buffer buff-name))))
-                        (message "Comment sent"))
-                       ('head-changed
-                        (let ((git-appraise-section-full-refresh? t)
-                              (git-appraise-comment-cursor-pos cursor-pos))
-                          (git-appraise--build-buffer buff-name)
-                          (message "Comment sent")))
-                       (_
-                        (message "Comment sent; refresh display to see it"))))))))))
+          (let* ((buf (get-buffer buff-name))
+                 (cursor-pos git-appraise-comment-cursor-pos))
+            (when buf
+              (with-current-buffer buf
+                (setq git-appraise-section-grouped-comments
+                      (git-appraise-utils-make-group
+                       (git-appraise-db--pullreq-raw-comments))))
+              (unless (equal (oref obj line-type) "FILE")
+                (let ((inserted
+                       (if (oref obj edit?)
+                           (git-appraise-comment--replace-local-comment-in-place obj buff-name)
+                         (git-appraise-comment--insert-local-comment-in-place
+                          obj buff-name cursor-pos))))
+                  (unless inserted
+                    (let ((git-appraise-section-full-refresh? nil))
+                      (git-appraise--build-buffer buff-name)))
+                  (git-appraise-comment--goto-saved-comment obj buff-name))))
+            (git-appraise-new-code-comment
+             (git-appraise-db-get-pullreq)
+             obj
+             (lambda (&rest _)
+               (let ((git-appraise-db--pullreq-id pr-id))
+                 (when draft-id
+                   (git-appraise-db-delete-raw-comment draft-id))
+                 ;; async callback: the draft is already rendered in
+                 ;; place; refresh canonical comment state and patch the
+                 ;; section sent, falling back to a non-full rebuild.
+                 (let* ((buf (get-buffer buff-name))
+                        (cursor-pos (or (and buf (window-live-p (get-buffer-window buf))
+                                               (window-point (get-buffer-window buf)))
+                                          (and buf (with-current-buffer buf (point)))
+                                          git-appraise-comment-cursor-pos)))
+                   (pcase (git-appraise-backend-refresh-comments
+                           (git-appraise-db-get-pullreq))
+                     ('ok
+                      (let ((patched
+                             (and (buffer-live-p buf)
+                                  (git-appraise-section--mark-comment-sent-in-place
+                                   buff-name
+                                   (or (git-appraise-comment--find-section-by-internal-id
+                                        buff-name
+                                        (and (slot-boundp obj 'internalId)
+                                             (oref obj internalId)))
+                                       (git-appraise-section--find-section
+                                        buf
+                                        (lambda (s)
+                                          (and (memq (oref s type)
+                                                     '(git-appraise-local-comment-section
+                                                       git-appraise-reply-comment-section))
+                                               (eq (oref s value) obj)))))))))
+                        (unless patched
+                          (let ((git-appraise-section-full-refresh? nil)
+                                (git-appraise-comment-cursor-pos cursor-pos))
+                            (git-appraise--build-buffer buff-name))))
+                      (message "Comment sent"))
+                     ('head-changed
+                      (let ((git-appraise-section-full-refresh? t)
+                            (git-appraise-comment-cursor-pos cursor-pos))
+                        (git-appraise--build-buffer buff-name)
+                        (message "Comment sent")))
+                     (_
+                      (message "Comment sent; refresh display to see it")))))))))
       (progn
         (git-appraise-comment--save-draft obj raw-comment)
         (let ((buf (get-buffer buff-name)))
