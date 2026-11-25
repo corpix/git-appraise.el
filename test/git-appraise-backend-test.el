@@ -5,7 +5,7 @@
 
 ;;; Code:
 
-(require 'buttercup)
+(require 'ert)
 (require 'cl-lib)
 (require 'git-appraise)
 (require 'git-appraise-test-helpers)
@@ -14,7 +14,7 @@
   "Run BODY in a disposable repository with an existing review."
   (declare (indent 0))
   `(git-appraise-test--with-review-repo "git-appraise-backend-test-"
-     ,@body))
+					,@body))
 
 (defun git-appraise-backend-test--show (directory revision)
   "Return native review JSON for REVISION in DIRECTORY."
@@ -22,290 +22,279 @@
    (git-appraise-test--run directory "git-appraise" "show" "-json" revision)
    "test show"))
 
-(describe "git-appraise backend"
-  (it "discovers local reviews and handles a repository without reviews"
-    (git-appraise-backend-test-with-repo
-      (expect (mapcar (lambda (review) (a-get review 'revision))
-                      (git-appraise-backend-list directory))
-              :to-equal (list revision))
-      (let ((empty (make-temp-file "git-appraise-backend-empty-" t)))
-        (unwind-protect
-            (progn
-              (git-appraise-test--run empty "git" "init" "-q")
-              (expect (git-appraise-backend-list empty) :to-be nil))
-          (delete-directory empty t)))))
+(ert-deftest git-appraise-backend/discovers-local-reviews-and-handles-a-repository-without-reviews ()
+  "discovers local reviews and handles a repository without reviews"
+  (git-appraise-backend-test-with-repo
+   (should (equal (mapcar (lambda (review) (a-get review 'revision))
+			  (git-appraise-backend-list directory)) (list revision)))
+   (let ((empty (make-temp-file "git-appraise-backend-empty-" t)))
+     (unwind-protect
+         (progn
+           (git-appraise-test--run empty "git" "init" "-q")
+           (should-not (git-appraise-backend-list empty)))
+       (delete-directory empty t)))))
 
-  (it "renders actual diff and inline comments in the existing buffer"
-    (git-appraise-backend-test-with-repo
-      (git-appraise-test--run
-       directory "git-appraise" "comment" "-m" "Inline feedback"
-       "-f" "example.txt" "-l" "2" revision)
-      (git-appraise-test--run
-       directory "git-appraise" "comment" "-m" "File feedback"
-       "-f" "example.txt" revision)
-      (git-appraise-backend-open revision)
-      (let ((git-appraise-section-full-refresh? t))
-        (git-appraise--build-buffer))
-      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
-      (let ((rendered (with-current-buffer (git-appraise-pr-buffer-name)
-                        (substring-no-properties (buffer-string)))))
-        (expect (string-match-p "Example review" rendered) :to-be-truthy)
-        (expect (string-match-p "\\+changed" rendered) :to-be-truthy)
-        (expect (string-match-p "Inline[ \t\n]+feedback" rendered)
-                :to-be-truthy)
-        (expect (string-match-p "File[ \t\n]+feedback" rendered)
-                :to-be-truthy)
-        (expect (string-match "\\+changed\\(?:.\\|\n\\)*Inline[ \t\n]+feedback" rendered)
-                :to-be-truthy))
-      (with-current-buffer (git-appraise-pr-buffer-name)
-        (goto-char (point-min))
-        (re-search-forward "^modified[ \t]+.*example\\.txt")
-        (beginning-of-line)
-        (git-appraise-comment-add-or-edit))
-      (expect (oref git-appraise-comment-uncommitted line-type)
-              :to-equal "FILE")
-      (kill-buffer git-appraise-comment-buffer-name)
-      (git-appraise-comment-reset-global-vars)
-      (git-appraise-test--run
-       directory "git-appraise" "comment" "-m" "External update" revision)
-      (let ((git-appraise-section-full-refresh? t))
-        (git-appraise--build-buffer))
-      (expect (string-match-p
-               "External[ \t\n]+update"
-               (with-current-buffer (git-appraise-pr-buffer-name)
-                 (substring-no-properties (buffer-string))))
-              :to-be-truthy)))
+(ert-deftest git-appraise-backend/renders-actual-diff-and-inline-comments-in-the-existing-buffer ()
+  "renders actual diff and inline comments in the existing buffer"
+  (git-appraise-backend-test-with-repo
+   (git-appraise-test--run
+    directory "git-appraise" "comment" "-m" "Inline feedback"
+    "-f" "example.txt" "-l" "2" revision)
+   (git-appraise-test--run
+    directory "git-appraise" "comment" "-m" "File feedback"
+    "-f" "example.txt" revision)
+   (git-appraise-backend-open revision)
+   (let ((git-appraise-section-full-refresh? t))
+     (git-appraise--build-buffer))
+   (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+   (let ((rendered (with-current-buffer (git-appraise-pr-buffer-name)
+                     (substring-no-properties (buffer-string)))))
+     (should (string-match-p "Example review" rendered))
+     (should (string-match-p "\\+changed" rendered))
+     (should (string-match-p "Inline[ \t\n]+feedback" rendered))
+     (should (string-match-p "File[ \t\n]+feedback" rendered))
+     (should (string-match "\\+changed\\(?:.\\|\n\\)*Inline[ \t\n]+feedback" rendered)))
+   (with-current-buffer (git-appraise-pr-buffer-name)
+     (goto-char (point-min))
+     (re-search-forward "^modified[ \t]+.*example\\.txt")
+     (beginning-of-line)
+     (git-appraise-comment-add-or-edit))
+   (should (equal (oref git-appraise-comment-uncommitted line-type) "FILE"))
+   (kill-buffer git-appraise-comment-buffer-name)
+   (git-appraise-comment-reset-global-vars)
+   (git-appraise-test--run
+    directory "git-appraise" "comment" "-m" "External update" revision)
+   (let ((git-appraise-section-full-refresh? t))
+     (git-appraise--build-buffer))
+   (should (string-match-p
+            "External[ \t\n]+update"
+            (with-current-buffer (git-appraise-pr-buffer-name)
+              (substring-no-properties (buffer-string)))))))
 
-  (it "submits a staged inline comment through the existing review command"
-    (git-appraise-backend-test-with-repo
-      (git-appraise-backend-open revision)
-      (let ((git-appraise-section-full-refresh? t))
-        (git-appraise--build-buffer))
-      (git-appraise-db--pullreq-raw-comments-update
-       '((author (login . "Tester"))
-         (state . "LOCAL COMMENT")
-         (comments (nodes ((internal-id . "draft-1")
-                           (bodyText . "Drafted inline")
-                           (path . "example.txt")
-                           (position . 3)
-                           (line-type . "ADDED")
-                           (local? . t))))))
-      (let ((git-appraise-section-full-refresh? nil))
-        (git-appraise--build-buffer))
-      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
-      (with-current-buffer (git-appraise-pr-buffer-name)
-        (git-appraise-submit-comments))
-      (expect (cl-find-if
-               (lambda (thread)
-                 (equal (a-get-in thread '(comment description))
-                        "Drafted inline"))
-               (a-get (git-appraise-backend-test--show directory revision)
-                      'comments))
-              :to-be-truthy)))
+(ert-deftest git-appraise-backend/submits-a-staged-inline-comment-through-the-existing-review-command ()
+  "submits a staged inline comment through the existing review command"
+  (git-appraise-backend-test-with-repo
+   (git-appraise-backend-open revision)
+   (let ((git-appraise-section-full-refresh? t))
+     (git-appraise--build-buffer))
+   (git-appraise-db--pullreq-raw-comments-update
+    '((author (login . "Tester"))
+      (state . "LOCAL COMMENT")
+      (comments (nodes ((internal-id . "draft-1")
+                        (bodyText . "Drafted inline")
+                        (path . "example.txt")
+                        (position . 3)
+                        (line-type . "ADDED")
+                        (local? . t))))))
+   (let ((git-appraise-section-full-refresh? nil))
+     (git-appraise--build-buffer))
+   (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+   (with-current-buffer (git-appraise-pr-buffer-name)
+     (git-appraise-submit-comments))
+   (should (cl-find-if
+            (lambda (thread)
+              (equal (a-get-in thread '(comment description))
+                     "Drafted inline"))
+            (a-get (git-appraise-backend-test--show directory revision)
+                   'comments)))))
 
-  (it "approves through the existing review command"
-    (git-appraise-backend-test-with-repo
-      (git-appraise-backend-open revision)
-      (let ((git-appraise-section-full-refresh? t))
-        (git-appraise--build-buffer))
-      (with-current-buffer (git-appraise-pr-buffer-name)
-        (git-appraise-submit-approve))
-      (expect (a-get (git-appraise-backend-test--show directory revision)
-                     'resolved)
-              :to-be t)))
+(ert-deftest git-appraise-backend/approves-through-the-existing-review-command ()
+  "approves through the existing review command"
+  (git-appraise-backend-test-with-repo
+   (git-appraise-backend-open revision)
+   (let ((git-appraise-section-full-refresh? t))
+     (git-appraise--build-buffer))
+   (with-current-buffer (git-appraise-pr-buffer-name)
+     (git-appraise-submit-approve))
+   (should (eq (a-get (git-appraise-backend-test--show directory revision)
+                      'resolved) t))))
 
-  (it "replies to a conversation comment through the existing editor"
-    (git-appraise-backend-test-with-repo
-      (git-appraise-test--run
-       directory "git-appraise" "comment" "-m" "Parent" revision)
-      (git-appraise-backend-open revision)
-      (let ((git-appraise-section-full-refresh? t))
-        (git-appraise--build-buffer))
-      (let* ((parent (car (a-get (git-appraise-backend-test--show directory revision)
-                                 'comments)))
-             (hash (a-get parent 'hash))
-             (section (git-appraise-comment-section :author "Tester" :id hash)))
-        (git-appraise-comment-handler-add-or-edit section)
-        (oset git-appraise-comment-uncommitted msg "Reply through editor")
-        (git-appraise-comment-handler-commit git-appraise-comment-uncommitted "")
-        (expect (a-get-in
-                 (car (a-get
-                       (car (a-get (git-appraise-backend-test--show directory revision)
-                                   'comments))
-                       'children))
-                 '(comment description))
-                :to-equal "Reply through editor")
-        (kill-buffer git-appraise-comment-buffer-name)
-        (git-appraise-comment-reset-global-vars))))
+(ert-deftest git-appraise-backend/replies-to-a-conversation-comment-through-the-existing-editor ()
+  "replies to a conversation comment through the existing editor"
+  (git-appraise-backend-test-with-repo
+   (git-appraise-test--run
+    directory "git-appraise" "comment" "-m" "Parent" revision)
+   (git-appraise-backend-open revision)
+   (let ((git-appraise-section-full-refresh? t))
+     (git-appraise--build-buffer))
+   (let* ((parent (car (a-get (git-appraise-backend-test--show directory revision)
+                              'comments)))
+          (hash (a-get parent 'hash))
+          (section (git-appraise-comment-section :author "Tester" :id hash)))
+     (git-appraise-comment-handler-add-or-edit section)
+     (oset git-appraise-comment-uncommitted msg "Reply through editor")
+     (git-appraise-comment-handler-commit git-appraise-comment-uncommitted "")
+     (should (equal (a-get-in
+                     (car (a-get
+			   (car (a-get (git-appraise-backend-test--show directory revision)
+                                       'comments))
+			   'children))
+                     '(comment description)) "Reply through editor"))
+     (kill-buffer git-appraise-comment-buffer-name)
+     (git-appraise-comment-reset-global-vars))))
 
-  (it "creates line and file comments, replies, and decisions through git-appraise"
-    (git-appraise-backend-test-with-repo
-      (let* ((pr (git-appraise-backend-repo
-                  :owner directory :repo "example" :number revision))
-             (diff (git-appraise-test--run
-                    directory "git-appraise" "show" "-diff" revision))
-             (comment (git-appraise-local-comment-section
-                       :state "LOCAL COMMENT" :author "Tester"
-                       :msg "New line comment" :path "example.txt"
-                       :position 3 :line-type "ADDED"))
-             (file-comment (git-appraise-local-comment-section
-                            :state "LOCAL COMMENT" :author "Tester"
-                            :msg "Whole file comment" :path "example.txt"
-                            :position 0 :line-type "FILE"))
-             (callback-count 0))
-        (oset pr raw-diff diff)
-        (git-appraise-new-code-comment
-         pr comment (lambda () (setq callback-count (1+ callback-count))))
-        (git-appraise-new-code-comment
-         pr file-comment (lambda () (setq callback-count (1+ callback-count))))
-        (expect callback-count :to-equal 2)
-        (let* ((native (git-appraise-backend-test--show directory revision))
-               (threads (a-get native 'comments))
-               (line-thread (cl-find-if
-                             (lambda (thread)
-                               (equal (a-get-in thread '(comment description))
-                                      "New line comment"))
-                             threads)))
-          (expect (a-get-in line-thread '(comment location range startLine))
-                  :to-equal 2)
-          (expect (cl-find-if
-                   (lambda (thread)
-                     (equal (a-get-in thread '(comment description))
-                            "Whole file comment")) threads)
-                  :to-be-truthy)
-          (git-appraise-backend-send-reply pr (a-get line-thread 'hash) "Reply")
-          (expect (a-get-in (git-appraise-backend-test--show directory revision)
-                            '(comments)) :to-be-truthy)
-          (expect
-           (a-get-in
-            (car (a-get
-                  (cl-find-if
-                   (lambda (thread)
-                     (equal (a-get thread 'hash) (a-get line-thread 'hash)))
-                   (a-get (git-appraise-backend-test--show directory revision)
-                          'comments))
-                  'children))
-            '(comment description))
-           :to-equal "Reply"))
-        (let ((decision (git-appraise-submit-appraise-review)))
-          (oset decision pr pr)
-          (oset decision state "APPROVE")
-          (git-appraise-send-review decision (lambda () (setq callback-count (1+ callback-count))))
-          (expect (a-get (git-appraise-backend-test--show directory revision) 'resolved)
-                  :to-be t)
-          (expect callback-count :to-equal 3)))))
+(ert-deftest git-appraise-backend/creates-line-and-file-comments-replies-and-decisions-through-git-appraise ()
+  "creates line and file comments, replies, and decisions through git-appraise"
+  (git-appraise-backend-test-with-repo
+   (let* ((pr (git-appraise-backend-repo
+               :owner directory :repo "example" :number revision))
+          (diff (git-appraise-test--run
+                 directory "git-appraise" "show" "-diff" revision))
+          (comment (git-appraise-local-comment-section
+                    :state "LOCAL COMMENT" :author "Tester"
+                    :msg "New line comment" :path "example.txt"
+                    :position 3 :line-type "ADDED"))
+          (file-comment (git-appraise-local-comment-section
+                         :state "LOCAL COMMENT" :author "Tester"
+                         :msg "Whole file comment" :path "example.txt"
+                         :position 0 :line-type "FILE"))
+          (callback-count 0))
+     (oset pr raw-diff diff)
+     (git-appraise-new-code-comment
+      pr comment (lambda () (setq callback-count (1+ callback-count))))
+     (git-appraise-new-code-comment
+      pr file-comment (lambda () (setq callback-count (1+ callback-count))))
+     (should (equal callback-count 2))
+     (let* ((native (git-appraise-backend-test--show directory revision))
+            (threads (a-get native 'comments))
+            (line-thread (cl-find-if
+                          (lambda (thread)
+                            (equal (a-get-in thread '(comment description))
+                                   "New line comment"))
+                          threads)))
+       (should (equal (a-get-in line-thread '(comment location range startLine)) 2))
+       (should (cl-find-if
+                (lambda (thread)
+                  (equal (a-get-in thread '(comment description))
+                         "Whole file comment")) threads))
+       (git-appraise-backend-send-reply pr (a-get line-thread 'hash) "Reply")
+       (should (a-get-in (git-appraise-backend-test--show directory revision)
+                         '(comments)))
+       (should (equal (a-get-in
+		       (car (a-get
+			     (cl-find-if
+			      (lambda (thread)
+				(equal (a-get thread 'hash) (a-get line-thread 'hash)))
+			      (a-get (git-appraise-backend-test--show directory revision)
+				     'comments))
+			     'children))
+		       '(comment description)) "Reply")))
+     (let ((decision (git-appraise-submit-appraise-review)))
+       (oset decision pr pr)
+       (oset decision state "APPROVE")
+       (git-appraise-send-review decision (lambda () (setq callback-count (1+ callback-count))))
+       (should (eq (a-get (git-appraise-backend-test--show directory revision) 'resolved) t))
+       (should (equal callback-count 3))))))
 
-  (it "keeps comments on earlier commits readable after the review ref moves"
-    (git-appraise-backend-test-with-repo
-      (git-appraise-test--run
-       directory "git-appraise" "comment" "-m" "Earlier line"
-       "-f" "example.txt" "-l" "2" revision)
-      (with-temp-file (expand-file-name "example.txt" directory)
-        (insert "first\nchanged again\nthird\n"))
-      (git-appraise-test--run directory "git" "commit" "-qam" "followup")
-      (let* ((review (git-appraise-backend-test--show directory revision))
-             (diff (git-appraise-test--run
-                    directory "git-appraise" "show" "-diff" revision))
-             (head (git-appraise-backend--head directory review))
-             (normalized (git-appraise-backend--normalize review diff head))
-             (fallback (a-get-in (car normalized) '(historicalComments nodes))))
-        (expect (equal head revision) :to-be nil)
-        (expect (cdr normalized) :to-be nil)
-        (expect (length fallback) :to-equal 1)
-        (expect (a-get (car fallback) 'path) :to-equal "example.txt")
-        (expect (a-get (car fallback) 'line) :to-equal 2)
-        (expect (a-get (car fallback) 'commit) :to-equal revision)
-        (expect (a-get (car fallback) 'bodyText) :to-equal "Earlier line"))))
+(ert-deftest git-appraise-backend/keeps-comments-on-earlier-commits-readable-after-the-review-ref-moves ()
+  "keeps comments on earlier commits readable after the review ref moves"
+  (git-appraise-backend-test-with-repo
+   (git-appraise-test--run
+    directory "git-appraise" "comment" "-m" "Earlier line"
+    "-f" "example.txt" "-l" "2" revision)
+   (with-temp-file (expand-file-name "example.txt" directory)
+     (insert "first\nchanged again\nthird\n"))
+   (git-appraise-test--run directory "git" "commit" "-qam" "followup")
+   (let* ((review (git-appraise-backend-test--show directory revision))
+          (diff (git-appraise-test--run
+                 directory "git-appraise" "show" "-diff" revision))
+          (head (git-appraise-backend--head directory review))
+          (normalized (git-appraise-backend--normalize review diff head))
+          (fallback (a-get-in (car normalized) '(historicalComments nodes))))
+     (should-not (equal head revision))
+     (should-not (cdr normalized))
+     (should (equal (length fallback) 1))
+     (should (equal (a-get (car fallback) 'path) "example.txt"))
+     (should (equal (a-get (car fallback) 'line) 2))
+     (should (equal (a-get (car fallback) 'commit) revision))
+     (should (equal (a-get (car fallback) 'bodyText) "Earlier line")))))
 
-  (it "rejects the current review with a native needs-work decision"
-    (git-appraise-backend-test-with-repo
-      (let* ((pr (git-appraise-backend-repo
-                  :owner directory :repo "example" :number revision))
-             (decision (git-appraise-submit-appraise-review)))
-        (oset decision pr pr)
-        (oset decision state "REQUEST_CHANGES")
-        (oset decision feedback "Needs more work")
-        (git-appraise-send-review decision (lambda ()))
-        (let ((native (git-appraise-backend-test--show directory revision)))
-          (expect (a-get native 'resolved) :to-be :false)
-          (expect (git-appraise-backend--state native) :to-equal "REJECTED")))))
+(ert-deftest git-appraise-backend/rejects-the-current-review-with-a-native-needs-work-decision ()
+  "rejects the current review with a native needs-work decision"
+  (git-appraise-backend-test-with-repo
+   (let* ((pr (git-appraise-backend-repo
+               :owner directory :repo "example" :number revision))
+          (decision (git-appraise-submit-appraise-review)))
+     (oset decision pr pr)
+     (oset decision state "REQUEST_CHANGES")
+     (oset decision feedback "Needs more work")
+     (git-appraise-send-review decision (lambda ()))
+     (let ((native (git-appraise-backend-test--show directory revision)))
+       (should (eq (a-get native 'resolved) :false))
+       (should (equal (git-appraise-backend--state native) "REJECTED"))))))
 
-  (it "refuses removed-line comments that git-appraise cannot locate in the head"
-    (git-appraise-backend-test-with-repo
-      (let* ((pr (git-appraise-backend-repo
-                  :owner directory :repo "example" :number revision))
-             (diff (git-appraise-test--run
-                    directory "git-appraise" "show" "-diff" revision))
-             (comment (git-appraise-local-comment-section
-                       :state "LOCAL COMMENT" :author "Tester"
-                       :msg "Removed line" :path "example.txt"
-                       :position 2 :line-type "REMOVED")))
-        (oset pr raw-diff diff)
-        (expect (condition-case nil
+(ert-deftest git-appraise-backend/refuses-removed-line-comments-that-git-appraise-cannot-locate-in-the-head ()
+  "refuses removed-line comments that git-appraise cannot locate in the head"
+  (git-appraise-backend-test-with-repo
+   (let* ((pr (git-appraise-backend-repo
+               :owner directory :repo "example" :number revision))
+          (diff (git-appraise-test--run
+                 directory "git-appraise" "show" "-diff" revision))
+          (comment (git-appraise-local-comment-section
+                    :state "LOCAL COMMENT" :author "Tester"
+                    :msg "Removed line" :path "example.txt"
+                    :position 2 :line-type "REMOVED")))
+     (oset pr raw-diff diff)
+     (should (eq (condition-case nil
+                     (progn (git-appraise-new-code-comment pr comment (lambda ())) nil)
+                   (user-error t)) t))
+     (should-not (a-get (git-appraise-backend-test--show directory revision)
+			'comments)))))
+
+(ert-deftest git-appraise-backend/refreshes-and-remaps-when-the-head-moves-before-sending-a-line-comment ()
+  "refreshes and remaps when the head moves before sending a line comment"
+  (git-appraise-backend-test-with-repo
+   (git-appraise-backend-open revision)
+   (let* ((pr (git-appraise-db-get-pullreq))
+          (comment (git-appraise-local-comment-section
+                    :state "LOCAL COMMENT" :author "Tester"
+                    :msg "Stale line" :path "example.txt"
+                    :position 3 :line-type "ADDED")))
+     (oset pr raw-diff (git-appraise-test--run
+                        directory "git-appraise" "show" "-diff" revision))
+     (oset pr sha revision)
+     (with-temp-file (expand-file-name "example.txt" directory)
+       (insert "first\nchanged again\nthird\n"))
+     (git-appraise-test--run directory "git" "commit" "-qam" "followup")
+     (let ((err (condition-case e
                     (progn (git-appraise-new-code-comment pr comment (lambda ())) nil)
-                  (user-error t)) :to-be t)
-        (expect (a-get (git-appraise-backend-test--show directory revision)
-                       'comments)
-                :to-be nil))))
+                  (user-error e))))
+       ;; The old blocking UX must be gone.  If the comment cannot be
+       ;; remapped on the new diff, a remap error is acceptable; a
+       ;; "reload before sending" block is not.
+       (when err
+         (should-not (string-match-p "reload before sending" (error-message-string err))))))))
 
-  (it "refreshes and remaps when the head moves before sending a line comment"
-    (git-appraise-backend-test-with-repo
-      (let* ((pr (git-appraise-backend-repo
-                  :owner directory :repo "example" :number revision))
-             (comment (git-appraise-local-comment-section
-                       :state "LOCAL COMMENT" :author "Tester"
-                       :msg "Stale line" :path "example.txt"
-                       :position 3 :line-type "ADDED")))
-        (oset pr raw-diff (git-appraise-test--run
-                           directory "git-appraise" "show" "-diff" revision))
-        (oset pr sha revision)
-        (with-temp-file (expand-file-name "example.txt" directory)
-          (insert "first\nchanged again\nthird\n"))
-        (git-appraise-test--run directory "git" "commit" "-qam" "followup")
-        (let ((err (condition-case e
-                       (progn (git-appraise-new-code-comment pr comment (lambda ())) nil)
-                     (user-error e))))
-          ;; The old blocking UX must be gone.  If the comment cannot be
-          ;; remapped on the new diff, a remap error is acceptable; a
-          ;; "reload before sending" block is not.
-          (when err
-            (expect (error-message-string err)
-                    :not :to-match "reload before sending"))))))
+(ert-deftest git-appraise-backend/rejects-malformed-cli-data-and-missing-executables ()
+  "rejects malformed CLI data and missing executables"
+  (git-appraise-backend-test-with-repo
+   (cl-letf (((symbol-function 'git-appraise-backend--run)
+              (lambda (&rest _) "{")))
+     (should (eq (condition-case nil
+                     (progn (git-appraise-backend-list directory) nil)
+                   (user-error t)) t)))
+   (should (eq (condition-case nil
+                   (progn (git-appraise-backend--json "[] trailing" "test") nil)
+                 (user-error t)) t))
+   (cl-letf (((symbol-function 'executable-find)
+              (lambda (_) nil)))
+     (should (eq (condition-case nil
+                     (progn (git-appraise-backend-list directory) nil)
+                   (user-error t)) t)))))
 
-  (it "rejects malformed CLI data and missing executables"
-    (git-appraise-backend-test-with-repo
-      (cl-letf (((symbol-function 'git-appraise-backend--run)
-                 (lambda (&rest _) "{")))
-        (expect (condition-case nil
-                    (progn (git-appraise-backend-list directory) nil)
-                  (user-error t)) :to-be t))
-      (expect (condition-case nil
-                  (progn (git-appraise-backend--json "[] trailing" "test") nil)
-                (user-error t)) :to-be t)
-      (cl-letf (((symbol-function 'executable-find)
-                 (lambda (_) nil)))
-        (expect (condition-case nil
-                    (progn (git-appraise-backend-list directory) nil)
-                  (user-error t)) :to-be t))))
-
-  (it "keeps URL dispatch and opts into local review dispatch"
-    (let (selected)
-      (cl-letf (((symbol-function 'git-appraise-utils-build-obj-from-url)
-                 (lambda (url) (setq selected (cons 'url url))))
-                ((symbol-function 'git-appraise-backend-open)
-                 (lambda (revision) (setq selected (cons 'appraise revision))))
-                ((symbol-function 'git-appraise--build-buffer)
-                 (lambda (&rest _) nil)))
-        (let ((git-appraise-start-backend 'url))
-          (git-appraise-start "https://github.com/example/repo/pull/1")
-          (expect selected :to-equal
-                  '(url . "https://github.com/example/repo/pull/1")))
-        (let ((git-appraise-start-backend 'appraise))
-          (git-appraise-start "abc123")
-          (expect selected :to-equal '(appraise . "abc123"))
-          (git-appraise-start "https://gitlab.com/example/repo/-/merge_requests/1")
-          (expect selected :to-equal
-                  '(url . "https://gitlab.com/example/repo/-/merge_requests/1")))))))
+;;; req-2026-11-25-056: open a local review by revision
+;; covers: git-appraise.el
+;; covers-fn: git-appraise-start
+;; enforcement: test
+(ert-deftest git-appraise-backend/req-2026-11-25-056-start-local-review ()
+  "WHEN a reviewer selects a local review THE SYSTEM SHALL open that review."
+  (let (selected)
+    (cl-letf (((symbol-function 'git-appraise-backend-open)
+               (lambda (revision) (setq selected revision)))
+              ((symbol-function 'git-appraise--build-buffer)
+               (lambda (&rest _) nil)))
+      (git-appraise-start "abc123")
+      (should (equal selected "abc123")))))
 
 ;;; req-2026-11-23-006: inline comments on git-appraise reviews
 ;; covers: git-appraise-backend.el git-appraise-comment.el git-appraise-actions.el

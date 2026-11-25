@@ -7,7 +7,6 @@
 
 ;;; Code:
 
-(require 'buttercup)
 (require 'cl-lib)
 (require 'git-appraise)
 (require 'git-appraise-test-helpers)
