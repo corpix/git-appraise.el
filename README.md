@@ -65,8 +65,8 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `C-c C-n` / `C-c C-p` | Move between diff hunks |
 | Review buffer | `n` / `p` | Move between visible files and hunks, one heading at a time |
 | Review buffer | `S-TAB` | Toggle the containing file from any hunk |
-| Review buffer | `v` | Toggle the viewed mark on the hunk at point, or the file on a file heading |
-| Review buffer | `V` | Toggle the viewed mark on the whole file |
+| Review buffer | `v` | Toggle the viewed mark: marking folds and advances, unmarking reopens |
+| Review buffer | `V` | Toggle the whole file's viewed mark the same way |
 | Review buffer | `G` | Reload the review |
 | Review buffer | `r a` / `r r` / `r c` | Accept, send needs-work findings, or send FYI comments |
 | Review buffer | `r R` | Explicitly reject the review |

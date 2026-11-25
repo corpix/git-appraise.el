@@ -25,6 +25,8 @@
 (require 'git-appraise-faces)
 (require 'git-appraise-actions)
 (require 'git-appraise-folding)
+(declare-function git-appraise-viewed-mark-and-fold "git-appraise-folding")
+(declare-function git-appraise-viewed-mark-file-and-fold "git-appraise-folding")
 (require 's)
 
 (defgroup git-appraise nil
@@ -159,8 +161,8 @@ offers local reviews instead of prompting for a URL."
     ("s f" "Toggle draft FYI" git-appraise-toggle-draft-fyi)]
    ["Buffer"
     ("d" "Description" git-appraise-popup-pr-description)
-    ("v" "Toggle viewed" git-appraise-viewed-toggle)
-    ("V" "Toggle file viewed" git-appraise-viewed-toggle-file)
+    ("v" "Mark viewed and fold" git-appraise-viewed-mark-and-fold)
+    ("V" "Mark file viewed and fold" git-appraise-viewed-mark-file-and-fold)
     ("x" "Toggle generated" git-appraise-toggle-exclude-gitattributes-generated)
     ("G" "Reload" git-appraise-reload)
     ("q" "Quit" transient-quit-one)]
@@ -184,8 +186,8 @@ offers local reviews instead of prompting for a URL."
     (define-key map (kbd "p") 'git-appraise-previous-item)
     (define-key map (kbd "G") 'git-appraise-reload)
     (define-key map (kbd "d") 'git-appraise-popup-pr-description)
-    (define-key map (kbd "v") 'git-appraise-viewed-toggle)
-    (define-key map (kbd "V") 'git-appraise-viewed-toggle-file)
+    (define-key map (kbd "v") #'git-appraise-viewed-mark-and-fold)
+    (define-key map (kbd "V") #'git-appraise-viewed-mark-file-and-fold)
     (define-key map (kbd "S-<tab>") 'git-appraise-fold-file-at-point)
     (define-key map (kbd "<backtab>") 'git-appraise-fold-file-at-point)
     (set-keymap-parent map magit-section-mode-map)

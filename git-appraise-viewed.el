@@ -640,7 +640,8 @@ mark/unmark within one second must still order deterministically
     (magit-map-sections
      (lambda (sec)
        (cond
-        ((magit-file-section-p sec)
+        ((or (magit-file-section-p sec)
+             (git-appraise-lazy-placeholder-section-p sec))
          (when-let* ((path (git-appraise-viewed--file-path sec)))
            (git-appraise-viewed--apply-file-heading-in-place sec path)))
         ((magit-hunk-section-p sec)

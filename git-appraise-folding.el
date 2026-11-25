@@ -13,6 +13,9 @@
 (require 'cl-lib)
 (require 'a)
 (require 'git-appraise-faces)
+(declare-function git-appraise-next-item "git-appraise-actions")
+(declare-function git-appraise-lazy-placeholder-section-p "git-appraise-lazy"
+                  (section))
 
 (defun git-appraise-eldoc--file-section (section)
   "Nearest file SECTION at or above SECTION, or nil."
@@ -346,6 +349,61 @@ file stays folded after a reload."
           (git-appraise-folding--set-file file folded)
           (when folded (goto-char (oref file start))))
       (magit-section-cycle-global))))
+
+(defun git-appraise-folding--advance-after (section)
+  "Move from folded SECTION to the next visible file or hunk heading."
+  (goto-char (oref section start))
+  (condition-case nil
+      (git-appraise-next-item)
+    (user-error nil)))
+
+(defun git-appraise-viewed-mark-and-fold ()
+  "Toggle the viewed mark at point and keep its fold state in step.
+Marking a hunk — or a whole file from its heading — folds it and
+moves to the next visible heading; removing the mark reopens it
+and leaves point in place.  With an active region, toggle the
+viewed state of the selected files only."
+  (interactive)
+  (if (use-region-p)
+      (git-appraise-viewed-toggle)
+    (let* ((section (magit-current-section))
+           (file (git-appraise-folding--file-section section))
+           (hunk (and file (git-appraise-viewed--current-hunk))))
+      (unless file
+        (user-error "No file or hunk at point to mark viewed"))
+      (let ((viewed? (if hunk
+                         (nth 3 (git-appraise-viewed--current-hunk-target))
+                       (git-appraise-viewed--file-viewed-p file))))
+        (if hunk
+            (git-appraise-viewed--toggle-hunk)
+          (git-appraise-viewed--toggle-file file))
+        (if viewed?
+            (if hunk
+                (git-appraise-folding--set-hunk hunk nil)
+              (git-appraise-folding--set-file file nil))
+          (if hunk
+              (git-appraise-folding--set-hunk hunk t)
+            (git-appraise-folding--set-file file t))
+          (git-appraise-folding--advance-after (or hunk file)))))))
+
+(defun git-appraise-viewed-mark-file-and-fold ()
+  "Toggle the whole-file viewed mark and keep the file's fold in step.
+Marking the file folds it and moves to the next visible heading;
+removing the mark reopens it and leaves point in place.  With an
+active region, toggle the viewed state of the selected files only."
+  (interactive)
+  (if (use-region-p)
+      (git-appraise-viewed-toggle-file)
+    (let ((file (git-appraise-folding--file-section
+                 (magit-current-section))))
+      (unless file
+        (user-error "No file at point to mark viewed"))
+      (let ((viewed? (git-appraise-viewed--file-viewed-p file)))
+        (git-appraise-viewed--toggle-file file)
+        (if viewed?
+            (git-appraise-folding--set-file file nil)
+          (git-appraise-folding--set-file file t)
+          (git-appraise-folding--advance-after file))))))
 
 (provide 'git-appraise-folding)
 ;;; git-appraise-folding.el ends here

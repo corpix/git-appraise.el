@@ -22,6 +22,8 @@
 (declare-function git-appraise-backend-send-reply "git-appraise-backend")
 (declare-function git-appraise-comment--find-section-by-internal-id
                   "git-appraise-comment-draft")
+(declare-function git-appraise-lazy-placeholder-section-p "git-appraise-lazy"
+                  (section))
 
 (defcustom git-appraise-lgtm-message "LGTM! :thumbsup:"
   "Message to add to fast track LGTM git-appraise."
@@ -506,7 +508,8 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
   (let (items)
     (magit-map-sections
      (lambda (s)
-       (when (and (memq (oref s type) '(file hunk))
+       (when (and (or (memq (oref s type) '(file hunk))
+                      (git-appraise-lazy-placeholder-section-p s))
                   (git-appraise--section-visible-p s))
          (push s items))))
     (sort items (lambda (a b) (< (oref a start) (oref b start))))))

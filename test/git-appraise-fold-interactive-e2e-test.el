@@ -243,5 +243,79 @@
         (call-interactively (key-binding (kbd "<backtab>")))
         (should-not (oref file hidden))))))
 
+;;; req-2026-11-25-069: viewed action folds and advances
+;; covers: git-appraise-folding.el git-appraise-viewed.el git-appraise.el
+;; covers-fn: git-appraise-viewed-mark-and-fold, git-appraise-viewed-mark-file-and-fold
+;; enforcement: test
+(ert-deftest fold-interactive-e2e/req-2026-11-25-069-viewed-folds-and-advances ()
+  "WHEN a reviewer marks a hunk or file viewed THE SYSTEM SHALL fold that item and move to the next visible heading.
+WHEN the mark is removed THE SYSTEM SHALL reopen the item and keep point in place.
+WHEN a reviewer marks an unloaded file viewed THE SYSTEM SHALL mark, fold and advance it as well."
+  (git-appraise-viewed-e2e-test--with-review
+    (let ((git-appraise-lazy-enabled nil))
+      (git-appraise-fold-interactive-e2e-test--build directory revision))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (pcase-let ((`(,file ,hunk)
+                   (git-appraise-fold-interactive-e2e-test--first-file-and-hunk)))
+        (should hunk)
+        (git-appraise-folding--set-file file nil)
+        (goto-char (oref hunk start))
+        (should (eq (key-binding (kbd "v"))
+                    #'git-appraise-viewed-mark-and-fold))
+        (call-interactively (key-binding (kbd "v")))
+        (should (oref hunk hidden))
+        (should (> (point) (oref hunk start)))
+        (should (bolp))
+        ;; removing the mark reopens the hunk without moving point
+        (goto-char (oref hunk start))
+        (call-interactively (key-binding (kbd "v")))
+        (should-not (oref hunk hidden))
+        (should (= (point) (oref hunk start)))
+        (goto-char (oref hunk start))
+        (should (eq (key-binding (kbd "V"))
+                    #'git-appraise-viewed-mark-file-and-fold))
+        (call-interactively (key-binding (kbd "V")))
+        (should (oref file hidden))
+        (should (> (point) (oref file start)))
+        (should (bolp))
+        ;; removing the file's mark reopens it without moving point
+        (goto-char (oref file start))
+        (call-interactively (key-binding (kbd "V")))
+        (should-not (oref file hidden))
+        (should (= (point) (oref file start)))))
+    ;; an unloaded lazy file can be marked, folded and advanced too
+    (git-appraise-viewed-e2e-test--with-review
+      (let ((git-appraise-lazy-enabled t)
+            (git-appraise-lazy-threshold 10))
+        (git-appraise-backend-open revision)
+        (let ((git-appraise-section-full-refresh? t))
+          (git-appraise--build-buffer)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (let ((ph (git-appraise-section--find-section
+                   (current-buffer)
+                   (lambda (s)
+                     (and (git-appraise-lazy-placeholder-section-p s)
+                          (equal (plist-get (oref s value) :path)
+                                 "big.txt")))))
+            point-before)
+          (should ph)
+          (goto-char (oref ph start))
+          (setq point-before (point))
+          (call-interactively (key-binding (kbd "V")))
+          (should (> (point) point-before))
+          (should (bolp))
+          ;; the mark and the fold choice were both stored
+          (should (plist-get (gethash "big.txt" git-appraise-section--viewed)
+                             :all-hunks))
+          (should (git-appraise-fold-state--file-folded-p "big.txt" nil))
+          ;; the unloaded heading shows the viewed indicator
+          (goto-char (point-min))
+          (should (re-search-forward "^modified[ \t]+.*big\\.txt" nil t))
+          (should (string-match-p
+                   "✓"
+                   (buffer-substring-no-properties
+                    (line-beginning-position) (line-end-position))))))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name))))))
+
 (provide 'git-appraise-fold-interactive-e2e-test)
 ;;; git-appraise-fold-interactive-e2e-test.el ends here
