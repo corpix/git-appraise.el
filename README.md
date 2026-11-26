@@ -89,8 +89,10 @@ Viewed marks record your review progress: `v` and `V` mark hunks and files
 viewed, the Files changed heading tracks `N/M viewed`, and a `[CHANGED]` tag
 flags files that were viewed before but changed since. Marks are content
 addressed (a line shift keeps a mark, an edit resets it) and live in your
-local git notes under `refs/notes/git-appraise-el/viewed`; they are never
-published by `git-appraise push`. See `docs/viewed-state.md`.
+personal review store (`git-appraise-store-file`, an SQLite database under
+your Emacs directory). See `docs/viewed-state.md`. Upgrading from an
+earlier version: run `M-x git-appraise-import-git-notes` once per
+repository to move existing marks, folds and drafts out of git notes.
 
 ## Configuration
 
@@ -127,8 +129,8 @@ other reviewers' comments are customizable through the
 
 The backend invokes the local `git-appraise` CLI. Use `git-appraise-push-notes`
 / `git-appraise-pull-notes` (or the `R`/`r` manage menus) to sync git-appraise
-notes with a remote. Viewed marks live in separate local notes and are not
-pushed by `git-appraise push`.
+notes with a remote. Personal marks and drafts live in the local store and are
+never pushed by `git-appraise push`.
 
 ## Development
 

@@ -1,22 +1,17 @@
 ;;; git-appraise-fold-state.el --- Persistent review folds -*- lexical-binding: t; -*-
 
 ;;; Commentary:
-;; Personal fold choices, anchored to the review revision in Git notes.
+;; Personal fold choices, anchored to the review revision in the
+;; personal SQLite store (`git-appraise-store.el').
 
 ;;; Code:
 (require 'a)
 (require 'dash)
-(require 'json)
 (require 'uuidgen)
-(require 'git-appraise-metadata)
+(require 'git-appraise-store)
 (require 'git-appraise-time)
 (require 'git-appraise-viewed)
 (defvar git-appraise-fold-hunks-by-default)
-
-(defcustom git-appraise-fold-notes-ref "refs/notes/git-appraise-el/folds"
-  "Personal Git notes ref used for review fold choices."
-  :group 'git-appraise
-  :type 'string)
 
 (defvar-local git-appraise-fold-state--index nil
   "Current review's fold events indexed by diff identity.")
@@ -37,33 +32,8 @@
         (a-get event 'fingerprint) (a-get event 'range)))
 
 (defun git-appraise-fold-state--read (repo revision)
-  "Read valid fold events for REVISION in REPO."
-  (pcase-let ((`(,code ,stdout ,stderr)
-               (git-appraise-metadata--git
-                repo (list "notes" (concat "--ref=" git-appraise-fold-notes-ref)
-                           "show" revision))))
-    (cond
-     ((zerop code)
-      (--keep
-       (condition-case nil
-           (let* ((json-object-type 'alist)
-                  (json-key-type 'symbol)
-                  (json-false :json-false)
-                  (event (json-read-from-string it)))
-             (when (and (equal (a-get event 'type) "fold")
-                        (equal (a-get event 'v) 1)
-                        (member (a-get event 'item) '("file" "hunk"))
-                        (stringp (a-get event 'path))
-                        (stringp (a-get event 'fingerprint))
-                        (stringp (a-get event 'actor))
-                        (stringp (a-get event 'at))
-                        (stringp (a-get event 'id))
-                        (memq (a-get event 'folded) '(t :json-false)))
-               event))
-         (error nil))
-       (split-string stdout "\n" t)))
-     ((and (= code 1) (string-match-p "no note found" stderr)) nil)
-     (t (error "Cannot read fold note: %s" (string-trim stderr))))))
+  "The stored fold events for REVISION in REPO."
+  (git-appraise-store-events repo revision 'fold))
 
 (defun git-appraise-fold-state--prepare ()
   "Project saved fold choices onto the current diff inventory."
@@ -134,7 +104,7 @@ fold conceals them, so any way of opening the file reveals them."
     (actor . ,actor) (item . ,item) (path . ,path)
     (fingerprint . ,fp)
     ,@(when range `((range . ,range)))
-    (folded . ,(if folded t :json-false))
+    (folded . ,(and folded t))
     (at . ,(git-appraise-time-now-utc t))))
 
 (defun git-appraise-fold-state--write (targets folded)
@@ -150,8 +120,7 @@ Each target is (ITEM PATH FP RANGE).  Return the written events."
                             item path fp range folded actor))
                          targets)))
       (condition-case err
-          (git-appraise-metadata-append
-           repo git-appraise-fold-notes-ref revision events)
+          (git-appraise-store-append-events repo revision 'fold events)
         (error (user-error "Could not save fold choice: %s"
                            (error-message-string err))))
       (--each events

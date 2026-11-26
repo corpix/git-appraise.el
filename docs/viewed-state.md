@@ -2,9 +2,9 @@
 
 Files and hunks can be marked **viewed** while reviewing, so you can
 put a review down and pick it up later without re-reading everything
-you already went through.  Marks are personal: they are stored in a
-git notes ref and are never published by ordinary git-appraise
-commands.
+you already went through.  Marks are personal: they are stored in the
+local SQLite review store (`git-appraise-store.el`) and are never
+published by ordinary git-appraise commands.
 
 ## Using it
 
@@ -33,27 +33,25 @@ tags or folding; folding is not a viewed action.
 
 ## Where it lives
 
-Each event is one JSON line in a git note anchored on the review's
-original revision (`Review.Revision`), under:
-
-```
-refs/notes/git-appraise-el/viewed
-```
-
-Inspect it with:
+Every event is one row in the `viewed_events` table of the store
+database (`git-appraise-store-file`, by default
+`~/.emacs.d/git-appraise/state.sqlite`), keyed by the repository and
+the review's original revision (`Review.Revision`).  Inspect it with:
 
 ```sh
-git notes --ref=refs/notes/git-appraise-el/viewed show <review-revision>
+sqlite3 ~/.emacs.d/git-appraise/state.sqlite \
+  'SELECT * FROM viewed_events WHERE revision = "<review-revision>"'
 ```
 
-Ordinary `git-appraise push` / `git-appraise pull` carry only
-`refs/notes/devtools/*`, so viewed marks stay local.  They are *not*
-private in any strong sense: if someone pushes the ref manually, it
-travels like any git object.  Do not point
-`git-appraise-viewed-notes-ref` into the `refs/notes/devtools/*`
-pattern unless you intend to publish every collaborator's progress —
-that is a separately designed sync feature, not a configuration
-switch.
+The store is local to the machine and never travels with
+`git-appraise push` / `git-appraise pull` (those carry only
+`refs/notes/devtools/*`).  Repository identity is the canonical
+common git dir, so linked worktrees share one set of marks.  After
+upgrading from the git-notes backend, run `M-x
+git-appraise-import-git-notes` once per repository: it moves the old
+notes into the store and deletes the `refs/notes/git-appraise-el/*`
+refs, recording each ref's pre-delete tip (in `legacy_imports`) so a
+ref can be restored with `git update-ref` until gc.
 
 ## What resets a mark
 

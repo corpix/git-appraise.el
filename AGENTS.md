@@ -30,9 +30,13 @@ affect the user's live Emacs immediately.
 | `git-appraise-criteria*.el` | criteria engine, brief, grill, regression request, checklist |
 | `git-appraise-budget*.el` | review budget queue + measured focus minutes |
 | `git-appraise-local.el` | local working-tree review |
-| `git-appraise-viewed.el`, `git-appraise-metadata.el` | viewed state and git-notes metadata transport |
-| `git-appraise-pr-state.el` | git-notes persistence for unsent feedback/drafts |
-| `git-appraise-db.el` | in-memory review state; local unsent state persisted via git notes |
+| `git-appraise-viewed.el` | viewed state and its projection onto the diff |
+| `git-appraise-pr-state.el` | unsent feedback/draft persistence (store-backed) |
+| `git-appraise-db.el` | in-memory review state; durable state lives in the store |
+| `git-appraise-sql.el` | query builder returning `(SQL . PARAMS)` for native sqlite |
+| `git-appraise-store.el` | SQLite store: connection, migrations runner, CRUD (`~/.emacs.d/git-appraise/state.sqlite`) |
+| `git-appraise-store-migrations.el` | versioned schema registry (`PRAGMA user_version`) |
+| `git-appraise-store-import.el` | one-shot legacy git-notes import (`M-x git-appraise-import-git-notes`); deletable later |
 | `git-appraise-browse.el` | browse-url integration |
 | `git-appraise-folding.el` | fold commands |
 | `git-appraise-actions.el` | interactive/navigation commands |
@@ -74,8 +78,11 @@ Tests are plain ERT run by `test/run-tests.el` in a batch `emacs -Q`
 
 ### Test conventions
 
-- DB-touching tests run inside `git-appraise-test--with-db` (fresh `/tmp`
-  sqlite; the user's real database is never touched).
+- DB-touching tests run inside `git-appraise-test--with-db` / a repo
+  harness: the store file is pinned to a fresh `/tmp` sqlite for the
+  whole batch by `test/run-tests.el`; the user's real database is
+  never touched. `git-appraise-test--reset-db` also closes the store
+  connection (that is how the "restart" tests simulate a reopen).
 - Section assertions use `git-appraise-test--sections-match`.
 - ERT names are `file-name/description` (slash form).
 
@@ -258,9 +265,9 @@ Tests are plain ERT run by `test/run-tests.el` in a batch `emacs -Q`
 
 ### DB and persistence
 
-- `git-appraise-db` is an in-memory hash table (`git-appraise-db--objects`); `git-appraise-db-update` stores in memory. No sqlite/closql.
-- Unsent local review state (feedback, local draft comments) is persisted to git notes (`refs/notes/git-appraise-el/pr-state` via `git-appraise-pr-state.el`). Hydrate on pullreq create; persist on feedback/draft mutations.
-- Strings persisted to git notes/JSON should be `substring-no-properties`'d.
+- `git-appraise-db` is an in-memory hash table (`git-appraise-db--objects`); `git-appraise-db-update` stores in memory. Durable personal state is SQLite (`git-appraise-store.el`), not closql.
+- Personal state (viewed/fold events, pr-state snapshots) lives in the store under the repository's canonical common git dir; the import job (`git-appraise-store-import.el`) moves legacy `refs/notes/git-appraise-el/*` notes in and deletes the refs. Hydrate on pullreq create; persist on feedback/draft mutations.
+- Strings persisted to the store/JSON should be `substring-no-properties`'d.
 - An untagged file has a PRESENT hash key with nil value — use a missing-key sentinel.  Likewise, a truthy cache-miss sentinel inside `or` short-circuits and leaks: use the two-step let/if.
 - `slot-boundp` on nil signals; guard with `(and obj (slot-boundp obj 'slot))`.
 

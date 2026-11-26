@@ -1,7 +1,7 @@
 (source gnu)
 (source melpa)
 
-(depends-on "emacs" "28.1")
+(depends-on "emacs" "29.1")
 (depends-on "closql" "2.3")
 (depends-on "magit" "3.0.0")
 (depends-on "transient" "0.3.7")

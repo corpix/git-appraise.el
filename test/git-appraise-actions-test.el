@@ -780,7 +780,7 @@
          magit-root-section)
         (goto-char (oref file start))
         (should (oref file hidden))
-        (cl-letf (((symbol-function 'git-appraise-metadata-append)
+        (cl-letf (((symbol-function 'git-appraise-store-append-events)
                    (lambda (&rest _) (error "write failed"))))
           (should-error (git-appraise-fold-file-at-point) :type 'user-error))
         (should (oref file hidden))))))

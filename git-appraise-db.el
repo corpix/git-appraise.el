@@ -3,7 +3,8 @@
 ;; Copyright (C) 2026 Dmitry Moskowski
 
 ;;; Commentary:
-;;  In-memory review model.  No SQL database.
+;;  In-memory review model.  Personal marks and drafts persist in
+;;  the SQLite store (`git-appraise-store.el'), not here.
 
 ;;; Code:
 

@@ -3,14 +3,14 @@
 ;;; Commentary:
 ;; Real git-appraise reviews in disposable repositories (the
 ;; `git-appraise-backend-test' harness), with viewed events written
-;; through the real notes transport.
+;; through the real store.
 
 ;;; Code:
 
 (require 'cl-lib)
 (require 'git-appraise)
 (require 'git-appraise-test-helpers)
-(require 'git-appraise-metadata)
+(require 'git-appraise-store)
 (require 'git-appraise-viewed)
 (require 'git-appraise-backend-test)
 
@@ -24,7 +24,6 @@ the countable items are 3 hunks + 1 hunk-less file."
           (default-directory (file-name-as-directory directory))
           revision)
      (git-appraise-test--reset-db)
-     (setq git-appraise-viewed--events-cache nil)
      (unwind-protect
          (progn
            (git-appraise-test--run directory "git" "init" "-q" "-b" "master")
@@ -55,7 +54,6 @@ the countable items are 3 hunks + 1 hunk-less file."
          (when (and review-buf (buffer-live-p review-buf))
            (kill-buffer review-buf)))
        (git-appraise-test--reset-db)
-       (setq git-appraise-viewed--events-cache nil)
        (delete-directory directory t))))
 
 (defun git-appraise-viewed-e2e-test--build (directory revision)
@@ -87,10 +85,8 @@ the countable items are 3 hunks + 1 hunk-less file."
     (cons (plist-get h :fp) (plist-get h :range))))
 
 (defun git-appraise-viewed-e2e-test--write (directory revision events)
-  "Append EVENTS to the viewed note, then drop the cache."
-  (git-appraise-metadata-append
-   directory git-appraise-viewed-notes-ref revision events)
-  (git-appraise-viewed--invalidate directory revision))
+  "Store EVENTS for DIRECTORY's REVISION directly."
+  (git-appraise-store-append-events directory revision 'viewed events))
 
 (defun git-appraise-viewed-e2e-test--hunk-event (id path index viewed)
   "A valid viewed event for PATH's INDEXth hunk."
@@ -178,23 +174,20 @@ the countable items are 3 hunks + 1 hunk-less file."
         (should (string-match-p "✓" rendered))
         (should (string-match-p "2/4 viewed" rendered))))))
 
-;;; req-2026-11-24-016: malformed note safe default
-(ert-deftest viewed-e2e/req-2026-11-24-016-malformed-note-safe-default ()
-  "WHEN the viewed note is unreadable THE SYSTEM SHALL complete the render with everything unviewed."
+;;; req-2026-11-24-016: unreadable store safe default
+(ert-deftest viewed-e2e/req-2026-11-24-016-unreadable-store-safe-default ()
+  "WHEN the stored viewed events cannot be read THE SYSTEM SHALL complete the render with everything unviewed."
   (git-appraise-viewed-e2e-test--with-review
-    (git-appraise-test--run
-     directory "git" "notes" "--ref=refs/notes/git-appraise-el/viewed"
-     "add" "-f" "-m" "{{{not json at all" revision)
-    (git-appraise-viewed--invalidate directory revision)
-    (git-appraise-viewed-e2e-test--build directory revision)
+    (cl-letf (((symbol-function 'git-appraise-store-events)
+               (lambda (&rest _) (error "store on fire"))))
+      (git-appraise-viewed-e2e-test--build directory revision))
     (let ((rendered (git-appraise-viewed-e2e-test--rendered)))
       (should (string-match-p "0/4 viewed" rendered))
       (should-not (string-match-p "✓" rendered)))))
 
 (defun git-appraise-viewed-e2e-test--note-events (directory revision)
-  "The raw event lines currently stored on REVISION's note."
-  (car (git-appraise-metadata-read
-        directory git-appraise-viewed-notes-ref revision)))
+  "The stored viewed events for DIRECTORY's REVISION."
+  (git-appraise-store-events directory revision 'viewed))
 
 (defun git-appraise-viewed-e2e-test--press (needle command)
   "Move point to NEEDLE in the review buffer and call COMMAND."
@@ -226,16 +219,16 @@ the countable items are 3 hunks + 1 hunk-less file."
       (should (string-match-p "1/4 viewed" rendered))
       (should (eq (git-appraise-viewed-e2e-test--face-at "@@ -1,5 +1,5")
                   'git-appraise-dimmed)))
-    ;; the mark survives a fresh full rebuild (the note is re-read)
+    ;; the mark survives a fresh full rebuild (the store is re-read)
     (git-appraise-viewed-e2e-test--build directory revision)
     (should (string-match-p "1/4 viewed" (git-appraise-viewed-e2e-test--rendered)))
-    ;; toggling again appends an unview event, never rewrites the note
+    ;; toggling again appends an unview event, never rewrites history
     (git-appraise-viewed-e2e-test--press "@@ -1,5 +1,5" #'git-appraise-viewed-toggle)
     (let ((events (git-appraise-viewed-e2e-test--note-events
                    directory revision)))
       (should (= (length events) 2))
       (should (equal (a-get (nth 0 events) 'viewed) t))
-      (should (eq (a-get (nth 1 events) 'viewed) :json-false)))
+      (should (null (a-get (nth 1 events) 'viewed))))
     (should (string-match-p "0/4 viewed" (git-appraise-viewed-e2e-test--rendered)))))
 
 ;;; req-2026-11-24-019: file rollup batch
@@ -283,7 +276,7 @@ the countable items are 3 hunks + 1 hunk-less file."
     (let ((events (git-appraise-viewed-e2e-test--note-events
                    directory revision)))
       (should (= (length events) 6))
-      (should (seq-every-p (lambda (e) (eq (a-get e 'viewed) :json-false))
+      (should (seq-every-p (lambda (e) (null (a-get e 'viewed)))
                            (nthcdr 4 events))))
     (should (string-match-p "0/4 viewed" (git-appraise-viewed-e2e-test--rendered)))))
 
@@ -316,11 +309,11 @@ the countable items are 3 hunks + 1 hunk-less file."
 ;; covers: git-appraise-viewed--write-events
 ;; enforcement: test
 (ert-deftest viewed-e2e/req-2026-11-24-021-failed-write-unchanged ()
-  "WHEN the note write fails THE SYSTEM SHALL keep the rendered and stored state unchanged and report the error."
+  "WHEN the store write fails THE SYSTEM SHALL keep the rendered and stored state unchanged and report the error."
   (git-appraise-viewed-e2e-test--with-review
     (git-appraise-viewed-e2e-test--build directory revision)
-    (let ((orig (symbol-function 'git-appraise-metadata-append)))
-      (fset 'git-appraise-metadata-append
+    (let ((orig (symbol-function 'git-appraise-store-append-events)))
+      (fset 'git-appraise-store-append-events
             (lambda (&rest _) (error "disk on fire")))
       (unwind-protect
           (let ((buf (get-buffer (git-appraise-pr-buffer-name)))
@@ -333,19 +326,18 @@ the countable items are 3 hunks + 1 hunk-less file."
                                     :type 'user-error))
             (should (string-match-p "disk on fire"
                                     (error-message-string err))))
-        (fset 'git-appraise-metadata-append orig)))
+        (fset 'git-appraise-store-append-events orig)))
     (should (null (git-appraise-viewed-e2e-test--note-events
                    directory revision)))
     (should (string-match-p "0/4 viewed" (git-appraise-viewed-e2e-test--rendered)))))
 
 ;;; req-2026-11-24-022: marks live beyond Lisp memory
 (ert-deftest viewed-e2e/req-2026-11-24-022-cross-process-persistence ()
-  "WHEN all in-memory event caches are dropped THE SYSTEM SHALL still show the marks, read back from the note."
+  "WHEN every in-memory projection is rebuilt from the store THE SYSTEM SHALL still show the marks."
   (git-appraise-viewed-e2e-test--with-review
     (git-appraise-viewed-e2e-test--build directory revision)
     (git-appraise-viewed-e2e-test--press "@@ -1,5 +1,5"
                                          #'git-appraise-viewed-toggle)
-    (setq git-appraise-viewed--events-cache nil)
     (git-appraise-viewed-e2e-test--build directory revision)
     (should (string-match-p "1/4 viewed" (git-appraise-viewed-e2e-test--rendered)))
     (should (eq (git-appraise-viewed-e2e-test--face-at "@@ -1,5 +1,5")
@@ -377,9 +369,8 @@ the countable items are 3 hunks + 1 hunk-less file."
                    directory "git" "rev-parse" "HEAD~1"))
           (event (git-appraise-viewed-e2e-test--hunk-event
                   "e-parent" "big.txt" 0 t)))
-      (git-appraise-metadata-append
-       directory git-appraise-viewed-notes-ref parent (list event))
-      (git-appraise-viewed--invalidate directory revision)
+      (git-appraise-store-append-events directory parent 'viewed
+                                        (list event))
       (git-appraise-viewed-e2e-test--build directory revision)
       (should (string-match-p "1/4 viewed" (git-appraise-viewed-e2e-test--rendered))))))
 

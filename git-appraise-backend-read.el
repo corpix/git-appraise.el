@@ -17,9 +17,6 @@
 (require 'git-appraise-time)
 (require 'git-appraise-utils)
 
-(declare-function git-appraise-viewed--refresh "git-appraise-viewed"
-                  (repo revision))
-
 ;; Declared valueless: `git-appraise.el' defines the defcustom, and a
 ;; value here would pre-bind it and kill that default.
 (defvar git-appraise-start-backend)
@@ -528,11 +525,6 @@ Signal `user-error' when the review data is unusable."
             (git-appraise-db--reconcile-raw-comments
              (cdr normalized) old-comments))
       (git-appraise-db-update current))
-    ;; personal viewed state lives in a git notes ref anchored on
-    ;; the review revision: re-read it so the render projects the
-    ;; freshest note.  Read failures are logged inside and never
-    ;; fatal; this is not a provider error.
-    (git-appraise-viewed--refresh directory revision)
     (git-appraise--trigger-hooks buffer-name nil message)))
 
 (defun git-appraise-backend-refresh-comments (obj)

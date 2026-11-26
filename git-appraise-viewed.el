@@ -1,7 +1,7 @@
 ;;; git-appraise-viewed.el --- persistent viewed state for review diffs -*- lexical-binding: t; -*-
 
 ;; Viewed marks for files and hunks (2026-11-24 viewed-state plan),
-;; backed by personal git notes (`git-appraise-metadata.el').
+;; backed by the personal SQLite store (`git-appraise-store.el').
 ;;
 ;; Identity layer: every hunk gets a content fingerprint (canonical
 ;; path + hunk body with the @@ range numbers normalized away), every
@@ -11,10 +11,10 @@
 ;; through the same parse/serialize helpers, so they can never
 ;; disagree about identities.
 ;;
-;; Projection layer: reduces the note's event lines (last write wins
+;; Projection layer: reduces the stored events (last write wins
 ;; per reviewer, item and fingerprint) onto the current diff's
-;; inventory.  Everything this file computes is a cache of the note,
-;; never the authoritative copy.
+;; inventory.  Everything this file computes is a cache of the
+;; store, never the authoritative copy.
 
 ;;; Code:
 
@@ -24,7 +24,7 @@
 (require 'dash)
 (require 'magit-section)
 (require 'uuidgen)
-(require 'git-appraise-metadata)
+(require 'git-appraise-store)
 (require 'git-appraise-time)
 (require 'git-appraise-utils)
 
@@ -212,7 +212,7 @@ back to the record ID as a deterministic tie-break."
            (string-greaterp (a-get cand 'id) (a-get winner 'id)))))
 
 (defun git-appraise-viewed--project (events actor inventory)
-  "Reduce the note's EVENTS for ACTOR onto the current INVENTORY.
+  "Reduce the stored EVENTS for ACTOR onto the current INVENTORY.
 Return a hash of canonical path -> plist:
 
   :total        INTEGER  countable items: hunks, or 1 for a hunk-less file
@@ -317,13 +317,6 @@ than mixing every user under an anonymous ID."
 
 ;;; Load boundary and render integration
 
-(defvar git-appraise-viewed--events-cache nil
-  "Alist ((REPO-DIR . REVISION) . EVENTS) of loaded note lines.
-A cache of the git note, never the authoritative copy:
-`git-appraise-backend-refresh' invalidates it so a reload re-reads
-the note, and the mark commands update it only after a successful
-write.")
-
 (defvar-local git-appraise-viewed--buffer-inventory nil
   "This render's identity inventory (`git-appraise-viewed--inventory').
 Same buffer lifetime as `git-appraise-section--viewed'.")
@@ -343,49 +336,23 @@ Same buffer lifetime as `git-appraise-section--viewed'.")
           (and dir (file-name-as-directory dir))))))
 
 (defun git-appraise-viewed--revision ()
-  "The review revision the notes are anchored on, or nil."
+  "The review revision the marks are anchored on, or nil."
   (ignore-errors (oref (git-appraise-db-get-pullreq) number)))
 
-(defun git-appraise-viewed--key (repo revision)
-  "The events-cache key for REPO and REVISION.
-The repo path is canonicalized: callers pass the worktree with a
-trailing slash (`git-appraise-viewed--repo-dir') and the backend's
-owner without, and both must hit the same cache entry."
-  (cons (directory-file-name (expand-file-name repo)) revision))
-
-(defun git-appraise-viewed--invalidate (repo revision)
-  "Drop the cached note lines for REPO and REVISION."
-  (let ((key (git-appraise-viewed--key repo revision)))
-    (setq git-appraise-viewed--events-cache
-          (--filter (not (equal (car it) key))
-                    git-appraise-viewed--events-cache))))
-
 (defun git-appraise-viewed--load (repo revision)
-  "The note lines for REPO and REVISION, read once into the cache.
-A missing note is no events.  A git failure is logged with a
-specific diagnostic and yields no events: a malformed note must
-never masquerade as a provider error."
-  (let ((key (git-appraise-viewed--key repo revision)))
-    (if-let* ((hit (assoc key git-appraise-viewed--events-cache #'equal)))
-        (cdr hit)
-      (let ((read (condition-case err
-                      (git-appraise-metadata-read
-                       repo git-appraise-viewed-notes-ref revision)
-                    (error
-                     (git-appraise-utils--log
-                      "git-appraise-viewed--load" (prin1-to-string err))
-                     (message "Viewed note unreadable (%s); showing all unviewed"
-                              (error-message-string err))
-                     (cons nil 0)))))
-        (when (> (cdr read) 0)
-          (message "Viewed note: %d unreadable records ignored" (cdr read)))
-        (push (cons key (car read)) git-appraise-viewed--events-cache)
-        (car read)))))
-
-(defun git-appraise-viewed--refresh (repo revision)
-  "Re-read the note for REPO and REVISION on the next projection."
-  (git-appraise-viewed--invalidate repo revision)
-  (git-appraise-viewed--load repo revision))
+  "The stored viewed events for REPO and REVISION.
+A repository without state, or a store failure, is no events: a
+broken store must never masquerade as a provider error."
+  (or (and repo revision
+           (condition-case err
+               (git-appraise-store-events repo revision 'viewed)
+             (error
+              (git-appraise-utils--log
+               "git-appraise-viewed--load" (prin1-to-string err))
+              (message "Viewed marks unavailable (%s); showing all unviewed"
+                       (error-message-string err))
+              nil)))
+      nil))
 
 (defun git-appraise-viewed--render-prepare (classifications)
   "Project the loaded viewed events onto the current diff.
@@ -518,7 +485,7 @@ mark/unmark within one second must still order deterministically
     (path . ,path)
     (fingerprint . ,fp)
     ,@(when range `((range . ,range)))
-    (viewed . ,(if viewed t :json-false))
+    (viewed . ,(and viewed t))
     (at . ,(git-appraise-time-now-utc t))))
 
 (defun git-appraise-viewed--reproject ()
@@ -652,10 +619,10 @@ mark/unmark within one second must still order deterministically
              (git-appraise-viewed--apply-hunk-heading-in-place sec path)))))))))
 
 (defun git-appraise-viewed--write-events (path items viewed)
-  "Append one event per (FP . RANGE) in ITEMS for PATH, then update UI.
-The in-memory index is updated only after the git write succeeds;
-a failed write leaves the rendered state unchanged and reports the
-git error."
+  "Store one event per (FP . RANGE) in ITEMS for PATH, then update UI.
+The store is updated only through a committed transaction; a
+failed write leaves the rendered state unchanged and reports the
+error."
   (let* ((repo (git-appraise-viewed--repo-dir))
          (revision (git-appraise-viewed--revision))
          (actor (and repo (git-appraise-viewed--actor repo))))
@@ -665,15 +632,13 @@ git error."
            (user-error "Set git user.email in %s to store viewed marks" repo))
           (t
            (condition-case err
-               (git-appraise-metadata-append
-                repo git-appraise-viewed-notes-ref revision
+               (git-appraise-store-append-events
+                repo revision 'viewed
                 (--map (git-appraise-viewed--make-event
                         actor path (car it) (cdr it) viewed)
                        items))
              (error (user-error "Could not save the viewed mark: %s"
                                 (error-message-string err))))
-           (git-appraise-viewed--invalidate repo revision)
-           (git-appraise-viewed--load repo revision)
            (git-appraise-viewed--reproject)
            (git-appraise-viewed--apply-in-place)))))
 
@@ -701,8 +666,9 @@ git error."
     (_ nil)))
 
 (defun git-appraise-viewed--write-bulk-events (groups)
-  "Write GROUPS of (PATH ITEMS VIEWED) in one append, then refresh UI.
-GROUPS with nil ITEMS are ignored."
+  "Write GROUPS of (PATH ITEMS VIEWED) in one store transaction.
+GROUPS with nil ITEMS are ignored; the projection and the visible
+buffer update only after the commit."
   (let* ((groups (--filter (nth 1 it) groups))
          (repo (git-appraise-viewed--repo-dir))
          (revision (git-appraise-viewed--revision))
@@ -722,12 +688,10 @@ GROUPS with nil ITEMS are ignored."
                      actor path (car item) (cdr item) viewed)
                     events))))
         (condition-case err
-            (git-appraise-metadata-append
-             repo git-appraise-viewed-notes-ref revision (nreverse events))
+            (git-appraise-store-append-events
+             repo revision 'viewed (nreverse events))
           (error (user-error "Could not save the viewed mark: %s"
                              (error-message-string err))))
-        (git-appraise-viewed--invalidate repo revision)
-        (git-appraise-viewed--load repo revision)
         (git-appraise-viewed--reproject)
         (git-appraise-viewed--apply-in-place))))))
 

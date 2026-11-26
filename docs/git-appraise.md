@@ -42,9 +42,10 @@ acceptance event. A resolving reply addresses its parent finding without
 silently accepting the whole review.
 
 git-appraise stores requests and published comments in its shared Git notes.
-Unsent drafts and progress marks live in separate personal notes refs. A local
-write stays local until `r p` pushes git-appraise notes; `r P` pulls teammates'
-review notes. The explicit `r L` command lands a review into its target. Comments
+Unsent drafts and progress marks live in the personal SQLite store
+(`git-appraise-store.el`), local to the machine. `r p` pushes git-appraise
+notes; `r P` pulls teammates' review notes. The explicit `r L` command lands a
+review into its target. Comments
 on an older commit appear folded under their file with their original path,
 line, and commit. The file heading shows a comment count while folded.
 Comments without a line appear in Conversation. Files start folded; hunks

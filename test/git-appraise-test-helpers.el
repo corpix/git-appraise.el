@@ -9,9 +9,35 @@
 
 (setq-default git-appraise-analysis-deferred? nil)
 
-(defun git-appraise-test--fresh-db-file ()
-  "Return a unique temporary file name (compat)."
-  (format "/tmp/git-appraise-test-db-%s.sqlite" (uuidgen-4)))
+(defmacro git-appraise-test--with-store (&rest body)
+  "Run BODY against a fresh temporary store database file."
+  (declare (indent 0))
+  `(let ((git-appraise-store-file
+          (make-temp-file "git-appraise-test-store-" nil ".sqlite")))
+     (unwind-protect
+         (progn
+           (git-appraise-store-close)
+           ,@body)
+       (git-appraise-store-close)
+       (ignore-errors (delete-file git-appraise-store-file)))))
+
+(defun git-appraise-test--reset-db (&optional _file)
+  "Reset the review stores.
+Clears the in-memory objects and closes the persistent store
+connection, so a reopen reads the database file from scratch."
+  (clrhash git-appraise-db--objects)
+  (setq git-appraise-db--pullreq-id nil)
+  (when (fboundp 'git-appraise-store-close)
+    (git-appraise-store-close)))
+
+(defmacro git-appraise-test--with-db (&rest body)
+  "Run BODY with a fresh in-memory review store and state database."
+  (declare (indent 0))
+  `(git-appraise-test--with-store
+     (git-appraise-test--reset-db)
+     (unwind-protect
+         (progn ,@body)
+       (git-appraise-test--reset-db))))
 
 (defvar git-appraise-test--repo-dir)
 
@@ -57,20 +83,6 @@ repositories and notes are never touched."
         (when (> (float-time) deadline)
           (ert-fail "lazy render never drained"))
         (sit-for 0.05)))))
-
-(defun git-appraise-test--reset-db (&optional _file)
-  "Reset the in-memory review store."
-  (clrhash git-appraise-db--objects)
-  (setq git-appraise-db--pullreq-id nil))
-
-(defmacro git-appraise-test--with-db (&rest body)
-  "Run BODY with a fresh in-memory review store."
-  (declare (indent 0))
-  `(progn
-     (git-appraise-test--reset-db)
-     (unwind-protect
-         (progn ,@body)
-       (git-appraise-test--reset-db))))
 
 (defun git-appraise-test--sections-match (insert-fn expected &optional buffer-empty?)
   "Run INSERT-FN in a temp buffer, match sections against EXPECTED."
