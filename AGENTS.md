@@ -96,7 +96,10 @@ Tests are plain ERT run by `test/run-tests.el` in a batch `emacs -Q`
    `require`), then render a fresh buffer and check section counts plus
    re-render stability.  `fmakunbound` removed defuns; `setq` changed
    defcustom defaults explicitly.
-4. Leave changes in the working tree.  The user reviews and commits.
+4. Commit completed work as you go, per Commit style below.  Small,
+   focused commits (a feature with its tests, a fix, a docs touch-up)
+   beat one big pile at the end; never commit a tree that fails
+   `just compile` / `just test`.
 
 ## Commit style
 
