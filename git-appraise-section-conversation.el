@@ -277,7 +277,9 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
             (push (list :key (format "review:%s:%s"
                                       author (or (a-get review 'submittedAt)
                                                  (a-get review 'createdAt)
+                                                 (a-get review 'databaseId)
                                                  (a-get (car nodes) 'databaseId)
+                                                 (a-get (car nodes) 'internal-id)
                                                  "unknown"))
                         :label (git-appraise-comment--review-group-label review)
                         :author author
