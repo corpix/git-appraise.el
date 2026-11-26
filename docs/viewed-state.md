@@ -14,29 +14,38 @@ published by ordinary git-appraise commands.
   hunks applies the action to every current hunk in one batch; a file
   without hunks — binary or metadata-only changes — gets its own
   mark).
+- `N` moves forward to the next file that is not fully viewed.
 
 The UI shows:
 
-- `  [VIEWED]` on a file heading once **all** of its current hunks
+- a viewed indicator on a file heading once **all** of its current hunks
   (or, for a hunk-less file, the file itself) are viewed;
 - `  [CHANGED]` on a file heading that was viewed before but whose
   content has changed since — a soft signal that never affects the
   mark state;
 - a dimmed hunk heading for each viewed hunk;
+- an orange left-margin bar on diff lines that changed after the file
+  was last marked fully viewed. The existing comment marker stays in
+  the fringe. For a change without a surviving diff line, the cue is
+  placed on the file heading;
 - `N/M viewed` below the Files changed heading.  Hunks and
   hunk-less files are the countable items; a file with hunks is not
   counted separately (its mark is the rollup).
 
-Marks survive rebuilds, `G` reloads and Emacs restarts.  Viewed state
-never changes comments, review decisions, diff contents, NEW/DOC/GEN
-tags or folding; folding is not a viewed action.
+Marks survive rebuilds, `G` reloads and Emacs restarts. The diff baseline
+is saved when the whole file becomes viewed, including when the final hunk
+is marked individually. Existing marks from older store versions gain a
+line baseline the next time the file is fully marked viewed.
 
 ## Where it lives
 
 Every event is one row in the `viewed_events` table of the store
 database (`git-appraise-store-file`, by default
 `~/.emacs.d/git-appraise/state.sqlite`), keyed by the repository and
-the review's original revision (`Review.Revision`).  Inspect it with:
+the review's original revision (`Review.Revision`). The latest full-file
+baseline is in `viewed_snapshots` under the same repository, revision,
+reviewer and path. Mark events and baselines are committed together.
+Inspect marks with:
 
 ```sh
 sqlite3 ~/.emacs.d/git-appraise/state.sqlite \
@@ -72,9 +81,9 @@ Therefore:
   whose stored position still agrees — ambiguous marks are never
   guessed onto a location.
 
-Old note lines are never deleted: an unmark appends a `viewed:false`
-record, and if a hunk's exact content returns later (a revert), the
-old mark applies again.
+Viewed event rows are not deleted: an unmark appends a `viewed:false`
+record, and if a hunk's exact content returns later (a revert), its
+earlier mark can apply again.
 
 ## Reduction rules
 
@@ -86,16 +95,15 @@ and reviewers are isolated: marks are stored per review revision and
 tagged with the reviewer, so two reviews in one repository and two
 reviewers on one review never share state.
 
-Known consequence of last-write-wins: if two devices with skewed
-clocks write opposing events for the same item (only possible once a
-shared ref exists), the later *recorded* timestamp wins regardless of
-who acted last.
+If a store file is copied between devices with skewed clocks, the
+later *recorded* timestamp wins for opposing events regardless of
+which action happened last.
 
 ## Implementation notes
 
-- `git-appraise-metadata.el` — the git notes transport (read/append,
-  validation, encoding).  Refs are an argument; no other notes ref is
-  ever written.
-- `git-appraise-viewed.el` — identities, the diff inventory, event
-  reduction, and the `v` / `V` commands.  Everything in memory is a
-  cache of the note, never the authoritative copy.
+- `git-appraise-viewed-core.el` computes diff identities, inventory and
+  event projection.
+- `git-appraise-viewed.el` handles viewed commands and display state;
+  `git-appraise-viewed-changes.el` compares full-file baselines and paints
+  margin bars.
+- `git-appraise-store.el` owns durable personal marks and baselines.

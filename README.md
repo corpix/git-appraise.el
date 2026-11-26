@@ -37,9 +37,10 @@ full local workflow.
 ## Reviewing
 
 The review buffer shows the request, commits, conversation, and file diffs.
-Existing inline comments appear next to their diff lines; comments on an
-older commit or outside the current diff appear in Conversation. File headings
-show change counts and tags such as `[DOC]` or `[GEN]`. Documentation,
+Conversation contains the full text of every review comment and reply, with
+links back to inline locations. Its groups can be folded, and their fold
+choices persist. Existing inline comments also appear next to their diff lines.
+File headings show change counts and tags such as `[DOC]` or `[GEN]`. Documentation,
 lockfiles, and generated output are classified and folded by default. Files
 marked `linguist-generated` or `linguist-vendored` in `.gitattributes` are
 excluded from the rendered diff by default; the Files changed heading reports
@@ -55,7 +56,9 @@ Press `r` for the command menu. The main actions are:
 | Diff line | `RET` | Draft an inline comment |
 | Diff hunk | `C-c RET` | Send one inline comment immediately |
 | File heading | `RET` | Send a file comment |
-| Existing comment | `RET` | Reply |
+| Inline comment | `RET` | Reply |
+| Conversation comment | `C-c C-a` | Reply |
+| Conversation heading | `RET` | Reveal the conversation |
 | Draft comment | `RET` | Edit the draft |
 | Draft comment | `C-c C-k` | Delete the draft |
 | Draft comment | `C-c C-f` | Mark or unmark the draft as FYI |
@@ -64,6 +67,7 @@ Press `r` for the command menu. The main actions are:
 | Comment editor | `C-c C-k` | Cancel editing |
 | Review buffer | `C-c C-n` / `C-c C-p` | Move between diff hunks |
 | Review buffer | `n` / `p` | Move between visible files and hunks, one heading at a time |
+| Review buffer | `N` | Jump to the next file that is not fully viewed |
 | Review buffer | `S-TAB` | Toggle the containing file from any hunk |
 | Review buffer | `v` | Toggle the viewed mark: marking folds and advances, unmarking reopens |
 | Review buffer | `V` | Toggle the whole file's viewed mark the same way |
@@ -76,6 +80,11 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `r b` | Rebase the current review onto its target |
 | Review buffer | `r L` | Land the current review into its target |
 | Review buffer | `r p` / `r P` | Push or pull git-appraise notes |
+
+`C-c C-r` publishes a native `-lgtm` reply to the selected finding, so its
+thread is resolved in git-appraise and can be exported with its notes.
+Draft comments can be edited or deleted locally. Published comments are
+append-only in git-appraise; reply to correct or clarify one.
 
 Drafts survive reloads and new commits on the reviewed branch. If the head
 changed, an old inline location must be checked before sending; the draft is
@@ -90,7 +99,10 @@ viewed, the Files changed heading tracks `N/M viewed`, and a `[CHANGED]` tag
 flags files that were viewed before but changed since. Marks are content
 addressed (a line shift keeps a mark, an edit resets it) and live in your
 personal review store (`git-appraise-store-file`, an SQLite database under
-your Emacs directory). See `docs/viewed-state.md`. Upgrading from an
+your Emacs directory). After a file is marked fully viewed, subsequent
+changes to its diff lines receive an orange bar in the left margin. The
+baseline for those bars is stored locally alongside the marks. See
+`docs/viewed-state.md`. Upgrading from an
 earlier version: run `M-x git-appraise-import-git-notes` once per
 repository to move existing marks, folds and drafts out of git notes.
 
