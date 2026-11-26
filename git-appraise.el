@@ -163,6 +163,7 @@ offers local reviews instead of prompting for a URL."
     ("d" "Description" git-appraise-popup-pr-description)
     ("v" "Mark viewed and fold" git-appraise-viewed-mark-and-fold)
     ("V" "Mark file viewed and fold" git-appraise-viewed-mark-file-and-fold)
+    ("N" "Next unviewed file" git-appraise-next-unviewed-file)
     ("x" "Toggle generated" git-appraise-toggle-exclude-gitattributes-generated)
     ("G" "Reload" git-appraise-reload)
     ("q" "Quit" transient-quit-one)]
@@ -183,6 +184,7 @@ offers local reviews instead of prompting for a URL."
     (define-key map (kbd "C-c C-n") 'git-appraise-next-hunk)
     (define-key map (kbd "C-c C-p") 'git-appraise-previous-hunk)
     (define-key map (kbd "n") 'git-appraise-next-item)
+    (define-key map (kbd "N") #'git-appraise-next-unviewed-file)
     (define-key map (kbd "p") 'git-appraise-previous-item)
     (define-key map (kbd "G") 'git-appraise-reload)
     (define-key map (kbd "d") 'git-appraise-popup-pr-description)

@@ -20,6 +20,7 @@
 (require 'git-appraise-diff)
 (require 'git-appraise-backend)
 (require 'git-appraise-viewed)
+(require 'git-appraise-viewed-changes)
 
 (declare-function git-appraise--diff--classify-diff "git-appraise-diff")
 (declare-function git-appraise--maybe-reorder-diff "git-appraise-diff")
@@ -145,6 +146,8 @@
     ;; the classifications (shared by the washer and lazy placeholders)
     (git-appraise-viewed--render-prepare
      git-appraise-section--file-classifications)
+    (git-appraise-viewed-changes--prepare
+     (git-appraise-db--pullreq-raw-diff))
     (git-appraise-fold-state--prepare)
     (erase-buffer)
     (insert (git-appraise--maybe-reorder-diff
@@ -189,7 +192,8 @@
      magit-root-section
      (not (or fresh-render? git-appraise-section--just-refetched))))
   (when git-appraise-comment-fringe-markers
-    (git-appraise--mark-comment-lines)))
+    (git-appraise--mark-comment-lines))
+  (git-appraise-viewed-changes--paint))
 
 (defun git-appraise--update-header-line (&rest _)
   "Update sticky header line for the current review buffer."

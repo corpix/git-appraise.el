@@ -128,7 +128,17 @@ ISO stamp being converted to integer microseconds."
    ;; and receiving ISO strings.
    (lambda (db)
      (git-appraise-store-migrations--timestamp-rebuild
-      db (git-appraise-store-migrations--v2-specs))))
+      db (git-appraise-store-migrations--v2-specs)))
+   ;; 3: one local diff snapshot per fully viewed file.  The snapshot
+   ;; is review progress, not published git-appraise metadata.
+   (lambda (db)
+     (sqlite-execute
+      db (git-appraise-store-migrations--table
+          'viewed_snapshots
+          '((repo :text :not-null) (revision :text :not-null)
+            (actor :text :not-null) (path :text :not-null)
+            (diff :text :not-null) (at_us :integer :not-null))
+          '(repo revision actor path)))))
   "Ordered schema migrations; entry N brings the database to
 version N+1.  Never edit an entry that shipped: add a new one.")
 

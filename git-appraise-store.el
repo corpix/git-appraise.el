@@ -41,7 +41,7 @@ Well below SQLite's historical 999-variable limit, so one insert
 statement never depends on the build's SQLITE_MAX_VARIABLE_NUMBER.")
 
 (defconst git-appraise-store--tables
-  '(viewed_events fold_events pr_state legacy_imports)
+  '(viewed_events fold_events pr_state legacy_imports viewed_snapshots)
   "Every table the schema defines.")
 
 (defvar git-appraise-store--db nil
@@ -224,11 +224,28 @@ transaction, so a split batch still commits whole or not at all."
                                             :rows it :on-conflict :ignore)))
         (sqlite-execute db sql params)))))
 
-(defun git-appraise-store-append-events (repo revision kind events)
+(defun git-appraise-store--insert-viewed-snapshot (db key revision actor path diff)
+  "Insert ACTOR's viewed DIFF for PATH using DB and repository KEY."
+  (pcase-let ((`(,sql . ,params)
+               (git-appraise-sql-insert
+                :into 'viewed_snapshots
+                :columns '(repo revision actor path diff at_us)
+                :rows (list (list key revision actor path
+                                  (substring-no-properties diff)
+                                  (git-appraise-time-parse-utc
+                                   (git-appraise-time-now-utc t))))
+                :on-conflict :replace)))
+    (sqlite-execute db sql params)))
+
+(defun git-appraise-store-append-events (repo revision kind events &optional snapshots)
   "Store EVENTS of KIND for REPOSITORY REVISION in one transaction.
 EVENTS are event alists as produced by the mark commands.  Any
 failure signals, leaving the store unchanged; a batch with a
-duplicate id is stored once.  Return EVENTS."
+duplicate id is stored once.  SNAPSHOTS, when KIND is viewed, is a
+list of (ACTOR PATH DIFF) committed atomically with the events.
+Return EVENTS."
+  (when (and snapshots (not (eq kind 'viewed)))
+    (error "Only viewed events can carry diff snapshots"))
   (let* ((repo-key (or (git-appraise-store-repo-key repo)
                        (error "No review repository to store %s marks in" kind)))
          (rows (--map (git-appraise-store--event-row kind it repo-key revision)
@@ -238,10 +255,46 @@ duplicate id is stored once.  Return EVENTS."
        (lambda ()
          (git-appraise-store--insert-chunked
           git-appraise-store--db (git-appraise-store--table kind)
-          (git-appraise-store--event-columns kind) rows))))
+          (git-appraise-store--event-columns kind) rows)
+         (--each snapshots
+           (pcase-let ((`(,actor ,path ,diff) it))
+             (git-appraise-store--insert-viewed-snapshot
+              git-appraise-store--db repo-key revision actor path diff))))))
     events))
 
 ;;; Unsent review state (feedback and draft comments)
+
+(defun git-appraise-store-viewed-snapshot (repo revision actor path)
+  "Return the saved diff snapshot for ACTOR's PATH in REPO REVISION."
+  (when-let* ((key (git-appraise-store-repo-key repo)))
+    (pcase-let ((`(,sql . ,params)
+                 (git-appraise-sql-select
+                  :from 'viewed_snapshots :columns '(diff)
+                  :where `(:and (= repo ,key) (= revision ,revision)
+                                (= actor ,actor) (= path ,path)))))
+      (caar (sqlite-select (git-appraise-store-db) sql params)))))
+
+(defun git-appraise-store-viewed-snapshots (repo revision actor)
+  "Return ACTOR's viewed diff snapshots for REPO REVISION by path."
+  (let ((table (make-hash-table :test #'equal)))
+    (when-let* ((key (git-appraise-store-repo-key repo)))
+      (pcase-let ((`(,sql . ,params)
+                   (git-appraise-sql-select
+                    :from 'viewed_snapshots :columns '(path diff)
+                    :where `(:and (= repo ,key) (= revision ,revision)
+                                  (= actor ,actor)))))
+        (--each (sqlite-select (git-appraise-store-db) sql params)
+          (puthash (car it) (cadr it) table))))
+    table))
+
+(defun git-appraise-store-save-viewed-snapshot (repo revision actor path diff)
+  "Save DIFF as ACTOR's latest fully viewed PATH in REPO REVISION."
+  (let ((key (or (git-appraise-store-repo-key repo)
+                 (error "No repository for viewed snapshot"))))
+    (git-appraise-store--call-in-write
+     (lambda ()
+       (git-appraise-store--insert-viewed-snapshot
+        git-appraise-store--db key revision actor path diff)))))
 
 (defun git-appraise-store--encode-comments (comments)
   "Encode the LOCAL-COMMENTS entries as JSON text; nil is an empty array."

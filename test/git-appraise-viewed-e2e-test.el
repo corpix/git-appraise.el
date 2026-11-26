@@ -12,6 +12,7 @@
 (require 'git-appraise-test-helpers)
 (require 'git-appraise-store)
 (require 'git-appraise-viewed)
+(require 'git-appraise-viewed-changes)
 (require 'git-appraise-backend-test)
 
 (defmacro git-appraise-viewed-e2e-test--with-review (&rest body)
@@ -104,6 +105,62 @@ the countable items are 3 hunks + 1 hunk-less file."
     `((v . 1) (type . "viewed") (id . ,id) (actor . "tester@example.com")
       (item . "file") (path . ,path) (fingerprint . ,fp)
       (viewed . ,(if viewed t :json-false)) (at . "2026-01-01T00:00:00Z"))))
+
+;;; req-2026-11-26-002: changed lines are marked after viewing
+;; covers: git-appraise-viewed.el git-appraise-viewed-changes.el git-appraise-store.el
+;; covers-fn: git-appraise-viewed-toggle-file, git-appraise-viewed-changes--paint
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-26-002-changed-line-margin ()
+  "WHEN a viewed file changes THE SYSTEM SHALL mark its newly changed diff lines at the left edge."
+  (git-appraise-viewed-e2e-test--with-review
+    (git-appraise-viewed-e2e-test--build directory revision)
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "big.txt")
+      (beginning-of-line)
+      (git-appraise-viewed-toggle-file))
+    (should (git-appraise-store-viewed-snapshot
+             directory revision "tester@example.com" "big.txt"))
+    (with-temp-file (expand-file-name "big.txt" directory)
+      (insert "l1\nL2-new\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nl12\n"))
+    (git-appraise-test--run directory "git" "commit" "-qam" "change viewed line")
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (git-appraise-reload))
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (should (search-forward "+L2-new" nil t))
+      (should (cl-some (lambda (ov)
+                         (overlay-get ov 'git-appraise-viewed-change-bar))
+                       (overlays-at (line-beginning-position))))
+      (goto-char (point-min))
+      (search-forward "big.txt")
+      (beginning-of-line)
+      (git-appraise-viewed-toggle-file)
+      (should-not (cl-some (lambda (ov)
+                             (overlay-get ov 'git-appraise-viewed-change-bar))
+                           (overlays-in (point-min) (point-max)))))))
+
+;;; req-2026-11-26-003: navigation skips fully viewed files
+;; covers: git-appraise-actions.el git-appraise.el
+;; covers-fn: git-appraise-next-unviewed-file
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-26-003-next-unviewed-file ()
+  "WHEN a reviewer advances to unfinished work THE SYSTEM SHALL skip files already fully viewed."
+  (git-appraise-viewed-e2e-test--with-review
+    (git-appraise-viewed-e2e-test--build directory revision)
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "big.txt")
+      (beginning-of-line)
+      (git-appraise-viewed-toggle-file)
+      (goto-char (point-min))
+      (execute-kbd-macro (kbd "N"))
+      (let ((path (git-appraise-viewed--file-path (magit-current-section))))
+        (should path)
+        (should-not (equal path "big.txt"))
+        (should-not (plist-get (gethash path git-appraise-section--viewed)
+                               :all-hunks))))))
 
 ;;; req-2026-11-24-013: render tags and counter
 (ert-deftest viewed-e2e/req-2026-11-24-013-render-tags-and-counter ()

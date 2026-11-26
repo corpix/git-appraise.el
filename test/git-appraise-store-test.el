@@ -47,6 +47,44 @@ normalized to six fractional digits."
     (viewed . ,viewed)
     (at . ,(or at "2026-01-01T00:00:00.000000Z"))))
 
+;;; req-2026-11-26-005: viewed marks and baselines commit together
+;; covers: git-appraise-store.el git-appraise-store-migrations.el
+;; covers-fn: git-appraise-store-append-events, git-appraise-store-viewed-snapshot
+;; enforcement: test
+(ert-deftest store/req-2026-11-26-005-viewed-snapshot-atomic ()
+  "WHEN saving a viewed baseline fails THE SYSTEM SHALL leave both the baseline and its mark unchanged."
+  (git-appraise-store-test--with-db
+    (git-appraise-store-test--with-repo
+      (should-error
+       (git-appraise-store-append-events
+        git-appraise-store-test--repo "review" 'viewed
+        (list (git-appraise-store-test--event "atomic" t))
+        (list (list "tester@example.com" "src/a.el" nil))))
+      (should-not (git-appraise-store-events
+                   git-appraise-store-test--repo "review" 'viewed))
+      (should-not (git-appraise-store-viewed-snapshot
+                   git-appraise-store-test--repo "review"
+                   "tester@example.com" "src/a.el")))))
+
+;;; req-2026-11-26-007: viewed baselines stay personal and review scoped
+;; covers: git-appraise-store.el
+;; covers-fn: git-appraise-store-viewed-snapshots
+;; enforcement: test
+(ert-deftest store/req-2026-11-26-007-viewed-snapshot-isolation ()
+  "WHEN a reviewer resumes a review THE SYSTEM SHALL load only that reviewer's saved file baselines."
+  (git-appraise-store-test--with-db
+    (git-appraise-store-test--with-repo
+      (git-appraise-store-save-viewed-snapshot
+       git-appraise-store-test--repo "review-a" "alice" "a.el" "old diff\n")
+      (git-appraise-store-save-viewed-snapshot
+       git-appraise-store-test--repo "review-a" "bob" "b.el" "bob diff\n")
+      (git-appraise-store-save-viewed-snapshot
+       git-appraise-store-test--repo "review-b" "alice" "c.el" "other diff\n")
+      (let ((saved (git-appraise-store-viewed-snapshots
+                    git-appraise-store-test--repo "review-a" "alice")))
+        (should (equal "old diff\n" (gethash "a.el" saved)))
+        (should (= 1 (hash-table-count saved)))))))
+
 ;;; req-2026-11-26-010: fresh initialization
 ;; covers: git-appraise-store-migrate git-appraise-store-migrations
 ;; enforcement: test

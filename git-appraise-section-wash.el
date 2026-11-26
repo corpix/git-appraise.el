@@ -243,7 +243,8 @@ INFO supplies its classification; LAZY marks a deferred file."
                             git-appraise-viewed-indicator
                           "")))
         (insert (propertize (format "%-3s" viewed-str)
-                            'font-lock-face 'git-appraise-dimmed)))
+                            'font-lock-face 'git-appraise-dimmed
+                            'git-appraise-viewed-column t)))
       ;; comment count column
       (let* ((count (git-appraise-history--file-count clean-path))
              (comment-str (if (and git-appraise-comment-indicator (> count 0))

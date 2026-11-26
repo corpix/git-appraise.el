@@ -1,6 +1,10 @@
 Conversation (5) · last 3 Jan 09:00
 General comments (2) · 1 Jan 08:00
   ↳ diff dave on example.txt:1 · 20 Dec 2025 08:00 · CHANGES_REQUESTED
+
+ Earlier
+ note
+
 Comment by carol · 1 Jan 08:00
 
  Stray
@@ -15,6 +19,13 @@ Summary
 
   ↳ diff example.txt:2 · 2 Jan 11:00
 
+ Inline
+ note
+
+
 Review: bob · APPROVED (1) · 3 Jan 09:00
   ↳ diff example.txt:3 · 3 Jan 09:05
+
+ LGTM
+ inline
 

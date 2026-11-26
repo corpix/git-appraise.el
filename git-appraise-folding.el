@@ -268,6 +268,13 @@ sync the slot to the visual state so toggling behaves as the user sees."
   (let* ((section (magit-current-section))
          (commits (git-appraise-folding--commits-section section)))
     (cond
+     ((eq (oref section type) 'git-appraise-conversation-group)
+      (let ((key (oref section value))
+            (folded (not (git-appraise-folding--effective-hidden-p section))))
+        (git-appraise-fold-state--write
+         (list (list "conversation" key key nil)) folded)
+        (if folded (magit-section-hide section)
+          (magit-section-show section))))
      (commits
       (magit-section-toggle commits)
       (when (oref commits hidden)

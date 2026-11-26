@@ -168,5 +168,64 @@ file is still background-loading or another file shifted the layout."
         (should (bolp))
         (should (looking-at-p " l4"))))))
 
+;;; req-2026-11-26-001: reload after a new commit leaves valid sections
+;; covers: git-appraise-render.el git-appraise-section.el git-appraise-lazy.el
+;; covers-fn: git-appraise-reload, git-appraise-render--call
+;; enforcement: test
+(ert-deftest git-appraise-lazy/req-2026-11-26-001-reload-after-commit ()
+  "WHEN a reviewed branch gains a commit THE SYSTEM SHALL reload with valid navigation and a complete file name."
+  (git-appraise-viewed-e2e-test--with-review
+    (let ((git-appraise-history-enabled nil)
+          (git-appraise-lazy-enabled t)
+          (git-appraise-lazy-threshold 10))
+      (git-appraise-backend-open revision)
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (should (search-forward "big.txt" nil t))
+        (beginning-of-line))
+      (with-temp-file (expand-file-name "big.txt" directory)
+        (insert "l1\nL2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nnew\n"))
+      (make-directory (expand-file-name "pkg/agent" directory) t)
+      (with-temp-file (expand-file-name
+                       "pkg/agent/bird_spec_builder.go" directory)
+        (insert "package agent\n"))
+      (git-appraise-test--run directory "git" "add" "-A")
+      (git-appraise-test--run directory "git" "commit" "-qm" "followup")
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (magit-section-pre-command-hook)
+        (setq magit-section-highlighted-sections
+              (list (magit-current-section)))
+        (let ((post-command (symbol-function 'magit-section-post-command-hook))
+              post-error)
+          (cl-letf (((symbol-function 'magit-section-post-command-hook)
+                     (lambda ()
+                       (condition-case err
+                           (funcall post-command)
+                         (error (setq post-error err))))))
+            (execute-kbd-macro (kbd "G")))
+          (should-not post-error)))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should (search-forward "big.txt" (line-end-position) t))
+        (should-not magit-section-highlighted-sections)
+        (run-hooks 'post-command-hook)
+        (goto-char (point-min))
+        (should (search-forward "pkg/agent/bird_spec_builder.go" nil t))
+        (beginning-of-line)
+        (git-appraise-viewed-toggle-file)
+        (goto-char (point-min))
+        (should (search-forward "pkg/agent/bird_spec_builder.go" nil t))
+        (git-appraise-reload)
+        (should (and (markerp (oref magit-root-section start))
+                     (eq (marker-buffer (oref magit-root-section start))
+                         (current-buffer)))))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (should (search-forward "pkg/agent/bird_spec_builder.go" nil t))))))
+
 (provide 'git-appraise-lazy-test)
 ;;; git-appraise-lazy-test.el ends here

@@ -1063,7 +1063,8 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
                                (line-beginning-position)
                              (point-max))))
                (actual (buffer-substring-no-properties start end)))
-          (should (equal actual expected))
+          (should (equal (string-trim-right actual)
+                         (string-trim-right expected)))
           ;; Groups are foldable sections.
           (let (groups)
             (magit-map-sections
@@ -1074,6 +1075,38 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
             (should (= (length groups) 3))
             (dolist (g groups)
               (should (oref g hidden)))))))))
+
+;;; req-2026-11-26-004: conversation folds survive a reload
+;; covers: git-appraise-section-conversation.el git-appraise-folding.el git-appraise-fold-state.el
+;; covers-fn: git-appraise-fold-toggle-at-point, git-appraise-comment--insert-conversation-group
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-26-004-conversation-fold-persisted ()
+  "WHEN a reviewer unfolds a conversation THE SYSTEM SHALL keep it open after reloading the review."
+  (git-appraise-comment-inplace-test-with-repo
+    (git-appraise-test--run directory "git-appraise" "comment" "-m"
+                            "Conversation to unfold" revision)
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (let (group)
+        (magit-map-sections
+         (lambda (s)
+           (when (eq (oref s type) 'git-appraise-conversation-group)
+             (setq group s))))
+        (should group)
+        (magit-section-show (oref group parent))
+        (goto-char (oref group start))
+        (git-appraise-fold-toggle-at-point)
+        (should-not (oref group hidden))
+        (git-appraise-reload)))
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (let (group)
+        (magit-map-sections
+         (lambda (s)
+           (when (eq (oref s type) 'git-appraise-conversation-group)
+             (setq group s))))
+        (should group)
+        (should-not (oref group hidden))))))
 
 ;;; req-2026-11-24-140: conversation diff link jumps to diff comment
 ;; covers: git-appraise-section-comment.el

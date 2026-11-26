@@ -529,6 +529,28 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
       (goto-char (oref target start))
     (user-error "No next file or hunk")))
 
+;;;###autoload
+(defun git-appraise-next-unviewed-file ()
+  "Move to the next file that is not fully viewed."
+  (interactive)
+  (let (target)
+    (magit-map-sections
+     (lambda (section)
+       (when (and (not target)
+                  (or (magit-file-section-p section)
+                      (git-appraise-lazy-placeholder-section-p section))
+                  (markerp (oref section start))
+                  (eq (marker-buffer (oref section start)) (current-buffer))
+                  (> (oref section start) (point))
+                  (let* ((path (git-appraise-folding--file-path section))
+                         (entry (and path (hash-table-p git-appraise-section--viewed)
+                                     (gethash path git-appraise-section--viewed))))
+                    (not (plist-get entry :all-hunks))))
+         (setq target section))))
+    (if target
+        (goto-char (oref target start))
+      (user-error "No next unviewed file"))))
+
 (defun git-appraise-previous-item ()
   "Move to the previous visible file or hunk heading."
   (interactive)

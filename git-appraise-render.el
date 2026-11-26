@@ -8,6 +8,21 @@
 (require 'dash)
 (require 'magit-section)
 
+(defun git-appraise-render--discard-old-section-ui ()
+  "Drop Magit's cached UI references to the replaced section tree.
+Those sections have markers in the backup buffer, which is killed
+at the end of this render.  A later post-command highlight must only
+walk the new tree."
+  (mapc #'delete-overlay magit-section-highlight-overlays)
+  (mapc #'delete-overlay magit-section-selection-overlays)
+  (setq magit-section-pre-command-section nil
+        magit-section-highlight-overlays nil
+        magit-section-selection-overlays nil
+        magit-section-highlighted-sections nil
+        magit-section-focused-sections nil
+        magit--ellipses-sections nil
+        magit-section-highlight-force-update t))
+
 (defun git-appraise-render--call (render)
   "Call RENDER, restoring the current review buffer if it fails or quits.
 Swap the old text into a private buffer instead of erasing it: copying text
@@ -28,6 +43,7 @@ values are restored without re-entering the major mode."
           (setq swapped t)
           (goto-char (point-min))
           (prog1 (funcall render)
+            (git-appraise-render--discard-old-section-ui)
             (setq complete t)))
       (when (and swapped (not complete))
         (with-current-buffer target
