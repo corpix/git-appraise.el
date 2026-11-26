@@ -437,8 +437,10 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
   "Reload the buffer."
   (interactive)
   (let ((pr (git-appraise-db-get-pullreq))
-        (git-appraise-section-full-refresh? t))
-    (setq git-appraise-comment-cursor-pos (point))
+        (git-appraise-section-full-refresh? t)
+        ;; the anchor is this reload's intent only: leaving it set
+        ;; would steer every later render to a stale position
+        (git-appraise-comment-cursor-pos (point)))
     (if pr
         (git-appraise--build-buffer)
       (error "No PR found"))))

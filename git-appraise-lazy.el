@@ -48,6 +48,8 @@
 (declare-function git-appraise-wash--insert-file-heading "git-appraise-section-wash")
 (declare-function git-appraise-section--fold-and-mark "git-appraise-section")
 (declare-function git-appraise-section--fold-hunks "git-appraise-folding")
+(declare-function git-appraise-folding--file-path "git-appraise-folding"
+                  (section))
 (declare-function git-appraise--mark-comment-lines "git-appraise-section")
 (declare-function git-appraise-utils--log "git-appraise-utils")
 
@@ -89,15 +91,13 @@ render's dynamic bindings are gone.  Drives the fresh-render folds
 at the drain.")
 (put 'git-appraise-lazy--fresh-render? 'permanent-local t)
 
-(defvar-local git-appraise-lazy--pre-render-point nil
-  "Where point should rest once the lazy drain finishes.
-Captured by `git-appraise--trigger-hooks' BEFORE the render replaces
-the buffer text: the cursor position of a submit flow
-(`git-appraise-comment-cursor-pos') wins, then the pre-render point,
-then point-min (a fresh render opens at the top).  Without this, the
-deferred chunk inserts leave point at the LAST expanded block — the
-bottom of the PR.")
-(put 'git-appraise-lazy--pre-render-point 'permanent-local t)
+(defvar-local git-appraise-lazy--pending-position nil
+  "Exact line a render parked the cursor on inside a still-loading
+file: (PATH LINE-DELTA COLUMN).  Applied by
+`git-appraise-lazy--settle-position' when the background loader
+expands that file, and only while the cursor still rests on the
+parked heading.")
+(put 'git-appraise-lazy--pending-position 'permanent-local t)
 
 (defvar-local git-appraise-lazy--just-refetched? nil
   "Captured `git-appraise-section--just-refetched' for the drain.")
@@ -331,6 +331,111 @@ expansion phase."
               (lambda (_)
                 (git-appraise-lazy--wash-step buffer epoch))))))))))
 
+;;; Restoring the cursor across a render
+
+(defun git-appraise-lazy--position-chain (pos)
+  "Describe POS as logical anchors, innermost section first.
+Every element is (IDENT LINE-DELTA COLUMN PATH): IDENT identifies
+the section in a later render, LINE-DELTA and COLUMN locate POS
+within it, and PATH is the enclosing file's path at the file
+level.  Stops at the first ancestor whose start marker no longer
+belongs to this buffer: a stale tree has no restorable position."
+  (save-excursion
+    (goto-char pos)
+    (let ((section (magit-current-section))
+          (line (line-number-at-pos pos))
+          (column (- pos (line-beginning-position)))
+          chain)
+      (while section
+        (let ((start (oref section start)))
+          (if (not (and (markerp start)
+                        (eq (marker-buffer start) (current-buffer))))
+              (setq section nil)
+            (push (list (magit-section-ident section)
+                        (- line (line-number-at-pos start))
+                        column
+                        (and (magit-file-section-p section)
+                             (git-appraise-folding--file-path section)))
+                  chain)
+            (setq section (and (slot-boundp section 'parent)
+                               (oref section parent))))))
+      (nreverse chain))))
+
+(defun git-appraise-lazy--exact-section (ident)
+  "The section IDENT identifies in this tree, or nil.
+`magit-get-section' alone also returns a matching ANCESTOR once
+the leaf is gone; the cursor must not mistake that for the leaf."
+  (let ((section (magit-get-section ident)))
+    (and section (equal (magit-section-ident section) ident) section)))
+
+(defun git-appraise-lazy--section-by-path (path)
+  "The file or placeholder section for PATH in this buffer, or nil."
+  (let (found)
+    (magit-map-sections
+     (lambda (s)
+       (unless found
+         (when (and (or (magit-file-section-p s)
+                        (git-appraise-lazy-placeholder-section-p s))
+                    (equal (git-appraise-folding--file-path s) path))
+           (setq found s))))
+     magit-root-section)
+    found))
+
+(defun git-appraise-lazy--goto-entry (section entry)
+  "Move to SECTION's start plus ENTRY's line delta and column."
+  (goto-char (oref section start))
+  (forward-line (min (nth 1 entry)
+                     (1- (max 1 (count-lines (oref section start)
+                                             (oref section end))))))
+  (forward-char (min (nth 2 entry)
+                     (max 0 (1- (- (line-end-position)
+                                   (line-beginning-position)))))))
+
+(defun git-appraise-lazy--restore-position (chain)
+  "Move point to CHAIN's position in the freshly rendered tree.
+The innermost surviving section wins; a file that is still loading
+parks the cursor on its heading and remembers the exact line for
+when the background loader expands it.  Nothing surviving leaves
+point at the top."
+  (setq git-appraise-lazy--pending-position nil)
+  (catch 'git-appraise-lazy--restored
+    (--each chain
+      (let ((section (git-appraise-lazy--exact-section (nth 0 it))))
+        (if (nth 3 it)
+            ;; the file level: by ident, else by path (loaded or not)
+            (cond (section
+                   (git-appraise-lazy--goto-entry section it)
+                   (throw 'git-appraise-lazy--restored t))
+                  (t
+                   (let ((file (git-appraise-lazy--section-by-path
+                                (nth 3 it))))
+                     (when file
+                       (if (git-appraise-lazy-placeholder-section-p file)
+                           (progn
+                             (goto-char (oref file start))
+                             (setq git-appraise-lazy--pending-position
+                                   (list (nth 3 it) (nth 1 it) (nth 2 it))))
+                         (git-appraise-lazy--goto-entry file it))
+                       (throw 'git-appraise-lazy--restored t)))))
+          (when section
+            (git-appraise-lazy--goto-entry section it)
+            (throw 'git-appraise-lazy--restored t)))))
+    (goto-char (point-min))))
+
+(defun git-appraise-lazy--settle-position (section)
+  "Refine a parked cursor now that SECTION's file finished loading.
+Applies only while the cursor still rests on the heading the render
+parked it on: the reviewer's own navigation wins."
+  (when (and git-appraise-lazy--pending-position
+             (equal (git-appraise-folding--file-path section)
+                    (nth 0 git-appraise-lazy--pending-position))
+             (= (point) (oref section start)))
+    (git-appraise-lazy--goto-entry
+     section
+     (list nil (nth 1 git-appraise-lazy--pending-position)
+           (nth 2 git-appraise-lazy--pending-position)))
+    (setq git-appraise-lazy--pending-position nil)))
+
 ;;; Loading
 
 (defun git-appraise-lazy--expand-at (section)
@@ -339,48 +444,55 @@ A failed wash rolls the placeholder back (text, properties and tree
 slot) and returns nil.  This is deliberately NOT
 `git-appraise-render--call': that swaps the whole buffer text to a
 backup, which would re-point the placeholder's markers into the
-backup buffer — it is a full-rebuild tool, not a partial-edit tool."
+backup buffer — it is a full-rebuild tool, not a partial-edit tool.
+Point at or after the block's end stays with the text that follows:
+an ordinary `save-excursion' would park it before the inserted block
+instead, dragging the cursor onto the loaded file's heading."
   (let* ((spec (oref section value))
          (parent (oref section parent))
          (text (plist-get spec :text))
          (inhibit-read-only t)
-         (new-section nil))
-    (save-excursion
-      (let* ((beg (progn (goto-char (oref section start)) (point-marker)))
-             (heading (buffer-substring (oref section start)
-                                        (oref section end)))
-             (old-children (oref parent children)))
-        (oset parent children (delq section (oref parent children)))
-        (delete-region beg (oref section end))
-        (insert text)
-        (let* ((end (copy-marker (point)))
-               (magit-insert-section--parent parent))
-          (goto-char beg)
-          (save-restriction
-            (narrow-to-region beg end)
-            (if (condition-case err
-                    (progn
-                      (git-appraise-render--wash-sequence
-                       #'git-appraise-wash-diff)
-                      (skip-chars-forward " \t\r\n")
-                      (unless (eobp)
-                        (error "Code review stopped before the end of the diff"))
-                      t)
-                  (error
-                   ;; roll the placeholder back: drop everything the
-                   ;; wash inserted, restore its heading and its slot
-                   (delete-region beg end)
-                   (insert heading)
-                   (oset parent children old-children)
-                   (message "Code review lazy load failed: %s"
-                            (error-message-string err))
-                   nil))
-                (setq new-section (car (last (oref parent children)))))))))
+         (new-section nil)
+         (parked (copy-marker (point) (>= (point) (oref section end)))))
+    (unwind-protect
+        (let* ((beg (progn (goto-char (oref section start)) (point-marker)))
+               (heading (buffer-substring (oref section start)
+                                          (oref section end)))
+               (old-children (oref parent children)))
+          (oset parent children (delq section (oref parent children)))
+          (delete-region beg (oref section end))
+          (insert text)
+          (let* ((end (copy-marker (point)))
+                 (magit-insert-section--parent parent))
+            (goto-char beg)
+            (save-restriction
+              (narrow-to-region beg end)
+              (if (condition-case err
+                      (progn
+                        (git-appraise-render--wash-sequence
+                         #'git-appraise-wash-diff)
+                        (skip-chars-forward " \t\r\n")
+                        (unless (eobp)
+                          (error "Code review stopped before the end of the diff"))
+                        t)
+                    (error
+                     ;; roll the placeholder back: drop everything the
+                     ;; wash inserted, restore its heading and its slot
+                     (delete-region beg end)
+                     (insert heading)
+                     (oset parent children old-children)
+                     (message "Code review lazy load failed: %s"
+                              (error-message-string err))
+                     nil))
+                  (setq new-section (car (last (oref parent children))))))))
+      (goto-char parked)
+      (set-marker parked nil))
     (when (and new-section
                (not (git-appraise-lazy-placeholder-section-p new-section)))
       (git-appraise-section--fold-hunks new-section nil)
       (when git-appraise-comment-fringe-markers
         (git-appraise--mark-comment-lines)))
+    (git-appraise-lazy--settle-position new-section)
     new-section))
 
 (defun git-appraise-lazy--load-next ()
@@ -401,51 +513,38 @@ Return non-nil when a file was loaded."
   "Expand queued placeholders in BUFFER, one per tick, while EPOCH
 is current.  When the queue drains, run the whole-buffer visibility
 passes (bot folds, viewed folds, fringe markers) that the render
-could not apply: the hunks did not exist yet at render time."
+could not apply: the hunks did not exist yet at render time.  Never
+moves point: `git-appraise-lazy--expand-at' parks the cursor with
+the text it inserts, and where the cursor rests belongs to the
+render or the reviewer."
   (when (and (buffer-live-p buffer)
              (eq epoch (buffer-local-value 'git-appraise-lazy--epoch buffer)))
     (with-current-buffer buffer
       (let ((git-appraise-db--pullreq-id
              (or git-appraise-lazy--review-id git-appraise-db--pullreq-id)))
-        (if (not (git-appraise-lazy--load-next))
-            ;; the drain's terminal branch runs in a deferred callback:
-            ;; NEVER signal (async errors land wherever the user is)
-            (progn
-              (condition-case err
-                  (let ((inhibit-read-only t)
-                        ;; the render's dynamic binding is long gone; the
-                        ;; drain re-installs the captured value so
-                        ;; fold-and-mark sees the render-time flags
-                        (git-appraise-section--just-refetched
-                         git-appraise-lazy--just-refetched?))
-                    (dolist (sec git-appraise-lazy--end-fixups)
-                      (when (and (object-of-class-p sec 'magit-section)
-                                 (slot-boundp sec 'end)
-                                 (markerp (oref sec end)))
-                        (set-marker (oref sec end) (point-max))))
-                    (when (and (boundp 'magit-root-section) magit-root-section)
-                      (git-appraise-section--fold-and-mark
-                       git-appraise-lazy--fresh-render?
-                       git-appraise-lazy--commit-focus?)))
-                (error
-                 (git-appraise-utils--log
-                  "lazy-drain" (error-message-string err))))
-              ;; the chunk inserts dragged point to the last expanded
-              ;; block (the bottom): rest it where the render intended.
-              ;; SEPARATE from fold-and-mark: a visibility-pass failure
-              ;; must not skip the point restore
-              (condition-case err
-                  (progn
-                    (goto-char (or git-appraise-lazy--pre-render-point
-                                   (point-min)))
-                    (dolist (w (get-buffer-window-list nil nil t))
-                      (set-window-point w (point))))
-                (error
-                 (git-appraise-utils--log
-                  "lazy-drain" (error-message-string err)))))
-          (deferred:nextc (deferred:next)
-                          (lambda (_)
-                            (git-appraise-lazy--expand-step buffer epoch))))))))
+        (if (git-appraise-lazy--load-next)
+            (deferred:nextc (deferred:next)
+                            (lambda (_)
+                              (git-appraise-lazy--expand-step buffer epoch)))
+          (condition-case err
+              (let ((inhibit-read-only t)
+                    ;; the render's dynamic binding is long gone; the
+                    ;; drain re-installs the captured value so
+                    ;; fold-and-mark sees the render-time flags
+                    (git-appraise-section--just-refetched
+                     git-appraise-lazy--just-refetched?))
+                (dolist (sec git-appraise-lazy--end-fixups)
+                  (when (and (object-of-class-p sec 'magit-section)
+                             (slot-boundp sec 'end)
+                             (marker-buffer (oref sec end)))
+                    (set-marker (oref sec end) (point-max))))
+                (when (and (boundp 'magit-root-section) magit-root-section)
+                  (git-appraise-section--fold-and-mark
+                   git-appraise-lazy--fresh-render?
+                   git-appraise-lazy--commit-focus?)))
+            (error
+             (git-appraise-utils--log
+              "lazy-drain" (error-message-string err)))))))))
 
 (defun git-appraise-lazy--schedule (commit-focus? fresh-render?)
   "Create file placeholders, then queue their deferred expansion.

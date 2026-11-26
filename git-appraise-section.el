@@ -233,13 +233,21 @@
            (ws (window-start window))
            (inhibit-read-only t)
            (fresh-render? (not magit-root-section))
-           (restore-section (magit-current-section))
-           (restore-ident (and restore-section
-                               (fboundp 'magit-section-ident)
-                               (magit-section-ident restore-section))))
-      (setq git-appraise-lazy--pre-render-point
-            (or git-appraise-comment-cursor-pos
-                (if window (window-point window) (point))))
+           ;; the anchor may be a marker that no longer belongs to this
+           ;; buffer (stale state left behind by an earlier flow): only
+           ;; a live position here is restorable
+           (anchor-pos (let ((anchor (or git-appraise-comment-cursor-pos
+                                         (if window
+                                             (window-point window)
+                                           (point)))))
+                         (cond ((numberp anchor) anchor)
+                               ((and (markerp anchor)
+                                     (eq (marker-buffer anchor)
+                                         (current-buffer)))
+                                (marker-position anchor)))))
+           (target (and magit-root-section anchor-pos
+                        (git-appraise-lazy--position-chain
+                         (min anchor-pos (point-max))))))
       (git-appraise-render--call
        (lambda ()
          (git-appraise--stage-time "insert-pr-text"
@@ -251,15 +259,10 @@
       (git-appraise--stage-time "activate-review-buffer"
         (git-appraise-section--activate-review-buffer
          buff-name window ws commit-focus?))
-      (let ((restored nil))
-        (when (and restore-ident (fboundp 'magit-get-section))
-          (when-let ((section (magit-get-section restore-ident)))
-            (goto-char (oref section start))
-            (setq restored t)))
-        (unless restored
-          (when-let ((restore-pos (or git-appraise-comment-cursor-pos
-                                       git-appraise-lazy--pre-render-point)))
-            (goto-char (min restore-pos (point-max))))))
+      ;; resolve the cursor's logical position once, here: the
+      ;; background loader then only carries it along with the text
+      (when target
+        (git-appraise-lazy--restore-position target)))
       (when msg
         (message nil)
         (message msg))
@@ -268,7 +271,7 @@
                                    (copy-sequence git-appraise-post-hook))))
         (git-appraise--stage-time
             (format "post-hook:%s" post-fn)
-          (funcall post-fn))))))
+          (funcall post-fn)))))
 
 (defun git-appraise--report-build-error (err)
   "Log build-chain ERR and message the user."

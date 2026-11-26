@@ -8,6 +8,8 @@
 (require 'ert)
 (require 'cl-lib)
 (require 'git-appraise-lazy)
+(require 'git-appraise)
+(require 'git-appraise-test-helpers)
 
 ;;; req-2026-11-23-011: lazy wash preserves point
 ;; covers: git-appraise-lazy.el
@@ -81,26 +83,90 @@ THE SYSTEM SHALL preserve the user's point in the review buffer."
             (git-appraise-lazy--invalidate))
           (kill-buffer it))))))
 
-;;; req-2026-11-24-005: background render returns to its own review position
+;;; req-2026-11-24-005: background render leaves the cursor alone
 ;; covers: git-appraise-lazy.el
 ;; covers-fn: git-appraise-lazy--expand-step
 ;; enforcement: test
-(ert-deftest git-appraise-lazy/req-2026-11-24-005-restore-own-point ()
-  "WHEN a background review finishes THE SYSTEM SHALL return to that review's prior reading position."
+(ert-deftest git-appraise-lazy/req-2026-11-24-005-drain-leaves-point ()
+  "WHEN a background review finishes
+THE SYSTEM SHALL leave point where the render or the reviewer put it."
   (let ((buf (generate-new-buffer " *git-appraise-point-review*")))
     (unwind-protect
         (with-current-buffer buf
           (insert "first\nsecond\n")
           (setq-local git-appraise-lazy--epoch (cons 'epoch nil)
                       git-appraise-lazy--review-id 'review
-                      git-appraise-lazy--pre-render-point (point-min)
                       git-appraise-lazy--queue nil)
           (goto-char (point-max))
-          (let ((git-appraise-comment-cursor-pos (point-max)))
+          (let ((git-appraise-comment-cursor-pos (point-min)))
             (git-appraise-lazy--expand-step buf git-appraise-lazy--epoch))
-          (should (= (point) (point-min))))
+          (should (= (point) (point-max))))
       (when (buffer-live-p buf)
         (kill-buffer buf)))))
+
+;;; req-2026-11-25-073: navigation during background loading wins
+;; covers: git-appraise-lazy.el
+;; covers-fn: git-appraise-lazy--expand-at
+;; enforcement: test
+(ert-deftest git-appraise-lazy/req-2026-11-25-073-background-load-keeps-navigation ()
+  "WHEN the reviewer moves while files load in the background
+THE SYSTEM SHALL leave the cursor on the line they navigated to."
+  (git-appraise-viewed-e2e-test--with-review
+    (let ((git-appraise-history-enabled nil)
+          (git-appraise-lazy-enabled t)
+          (git-appraise-lazy-threshold 10))
+      (git-appraise-backend-open revision)
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (re-search-forward "mode\\.sh" nil t)
+        (beginning-of-line))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should (bolp))
+        (should (looking-at-p "modified[ \t]+.*mode\\.sh"))))))
+
+;;; req-2026-11-25-074: re-render returns to the same logical line
+;; covers: git-appraise-lazy.el git-appraise-section.el git-appraise-actions.el
+;; covers-fn: git-appraise-lazy--position-chain, git-appraise-lazy--restore-position, git-appraise-lazy--settle-position
+;; enforcement: test
+(ert-deftest git-appraise-lazy/req-2026-11-25-074-rerender-returns-to-line ()
+  "WHEN a review re-renders while the reviewer keeps still
+THE SYSTEM SHALL return the cursor to the same line, even when that
+file is still background-loading or another file shifted the layout."
+  (git-appraise-viewed-e2e-test--with-review
+    (let ((git-appraise-history-enabled nil)
+          (git-appraise-lazy-enabled t)
+          (git-appraise-lazy-threshold 10))
+      (git-appraise-backend-open revision)
+      (let ((git-appraise-section-full-refresh? t))
+        (git-appraise--build-buffer))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      ;; reload onto a line inside a file that loads in the background
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (re-search-forward "^ l4" nil t)
+        (beginning-of-line)
+        (git-appraise-reload))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should (bolp))
+        (should (looking-at-p " l4")))
+      ;; a new file above shifts every byte offset; the line survives
+      (with-temp-file (expand-file-name "aaa.txt" directory)
+        (insert "a\nb\nc\n"))
+      (git-appraise-test--run directory "git" "add" "aaa.txt")
+      (git-appraise-test--run directory "git" "commit" "-qm" "add aaa")
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (re-search-forward "^ l4" nil t)
+        (beginning-of-line)
+        (git-appraise-reload))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should (bolp))
+        (should (looking-at-p " l4"))))))
 
 (provide 'git-appraise-lazy-test)
 ;;; git-appraise-lazy-test.el ends here
