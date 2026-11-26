@@ -141,18 +141,20 @@ For internal usage only.")
         git-appraise-comment-pending-submit-event nil))
 
 (defun git-appraise-comment-strip-known-helpers (msg)
-  "Remove known git-appraise comment helper text from MSG."
-  (let ((msg (or msg ""))
-        (helpers (delq nil
-                       (list (and (boundp 'git-appraise-comment-buffer-msg)
-                                  git-appraise-comment-buffer-msg)
-                             (and (boundp 'git-appraise-comment-feedback-msg)
-                                  git-appraise-comment-feedback-msg)
-                             (and (boundp 'git-appraise-comment-single-comment-msg)
-                                  git-appraise-comment-single-comment-msg)))))
-    (dolist (helper helpers)
-      (setq msg (git-appraise-utils--comment-clean-msg msg helper)))
-    msg))
+  "Remove every known composer helper text from MSG and trim the rest.
+Whichever flow opened a composer seeded one of the known helper
+texts; a commit must not depend on which one."
+  (string-trim
+   (let ((msg (or msg ""))
+         (helpers (delq nil
+                        (list (and (boundp 'git-appraise-comment-buffer-msg)
+                                   git-appraise-comment-buffer-msg)
+                              (and (boundp 'git-appraise-comment-feedback-msg)
+                                   git-appraise-comment-feedback-msg)
+                              (and (boundp 'git-appraise-comment-single-comment-msg)
+                                   git-appraise-comment-single-comment-msg)))))
+     (dolist (helper helpers msg)
+       (setq msg (git-appraise-utils--comment-clean-msg msg helper))))))
 
 (defun git-appraise--compute-line-and-side ()
   "Compute the review comment LINE and SIDE at or near point.
@@ -388,8 +390,7 @@ between the file heading and the hunk header has no source location."
       (git-appraise-comment--refresh pr)
       (git-appraise-comment-reset-global-vars)))
    (git-appraise-comment-feedback?
-    (let* ((msg (git-appraise-utils--comment-clean-msg
-                 comment-text git-appraise-comment-feedback-msg))
+    (let* ((msg (git-appraise-comment-strip-known-helpers comment-text))
            (pending-event git-appraise-comment-pending-submit-event)
            (buff-name (git-appraise-pr-buffer-name pr)))
       (when (string-empty-p msg)
@@ -402,13 +403,13 @@ between the file heading and the hunk header has no source location."
       (when pending-event
         (git-appraise--submit pending-event))))
    (git-appraise-comment-send?
-    (oset git-appraise-comment-uncommitted msg comment-text)
+    (oset git-appraise-comment-uncommitted msg
+          (git-appraise-comment-strip-known-helpers comment-text))
     (git-appraise-comment-handler-commit
      git-appraise-comment-uncommitted git-appraise-comment-single-comment-msg)
     (git-appraise-comment-reset-global-vars))
    (git-appraise-comment-single-comment?
-    (let* ((msg (git-appraise-utils--comment-clean-msg
-                 comment-text git-appraise-comment-single-comment-msg))
+    (let* ((msg (git-appraise-comment-strip-known-helpers comment-text))
            (buff-name (git-appraise-pr-buffer-name pr))
            (buf (get-buffer buff-name))
            (cursor-pos (or (and buf (window-live-p (get-buffer-window buf))

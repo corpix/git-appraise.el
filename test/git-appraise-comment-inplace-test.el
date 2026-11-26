@@ -1402,5 +1402,52 @@ THE SYSTEM SHALL show it immediately and keep unrelated rendering in the backgro
                      (git-appraise-comment--find-section-by-internal-id
                       (buffer-name buf) (oref comment internalId))))))))))
 
+;;; req-2026-11-25-075: composer helper text never reaches a comment
+;; covers: git-appraise-comment.el git-appraise-comment-draft.el
+;; covers-fn: git-appraise-comment-strip-known-helpers, git-appraise-comment-handler-commit
+;; enforcement: test
+(ert-deftest git-appraise-comment-inplace/req-2026-11-25-075-commit-strips-composer-helper ()
+  "WHEN a reviewer commits a comment typed into a composer
+THE SYSTEM SHALL save it without any composer helper text, whichever
+flow opened the composer."
+  (git-appraise-comment-inplace-test-with-repo
+    ;; every known seed strips, in any combination
+    (should (equal "real text"
+                   (git-appraise-comment-strip-known-helpers
+                    (concat git-appraise-comment-buffer-msg "\n"
+                            git-appraise-comment-single-comment-msg "\n"
+                            git-appraise-comment-feedback-msg "\n"
+                            "real text"))))
+    (git-appraise-comment-inplace-test--open-and-render revision)
+    (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
+           (git-appraise-section-full-refresh? nil))
+      (with-current-buffer buf
+        (goto-char (point-min))
+        (re-search-forward "^\\+changed" nil t)
+        (setq git-appraise-comment-cursor-pos (line-beginning-position)
+              git-appraise-comment-uncommitted
+              (git-appraise-local-comment-section
+               :state "LOCAL COMMENT"
+               :author "Tester"
+               :path "example.txt"
+               :side "RIGHT"
+               :line 2
+               :line-type "ADDED"
+               :send? nil
+               :msg (concat git-appraise-comment-buffer-msg
+                            "\ntake a look at line 2"))
+              git-appraise-comment-commit-buffer? nil)
+        ;; a mismatched flow: the composer holds the standard seed while
+        ;; the committing pass strips against the single-comment seed
+        (git-appraise-comment-handler-commit
+         git-appraise-comment-uncommitted
+         git-appraise-comment-single-comment-msg)
+        (goto-char (point-min))
+        (should (search-forward "take a look at line 2" nil t))
+        (goto-char (point-min))
+        (should-not (search-forward "Type C-c C-c" nil t))
+        (should-not (search-forward "check the transient menu" nil t)))
+      (git-appraise-comment-reset-global-vars))))
+
 (provide 'git-appraise-comment-inplace-test)
 ;;; git-appraise-comment-inplace-test.el ends here

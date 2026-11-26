@@ -314,8 +314,8 @@ be found, so callers can rebuild."
   "Commit the reply OBJ and clean the DEFAULT-BUFF-MSG from the text if any."
   (if (git-appraise-backend-repo-p (git-appraise-db-get-pullreq))
       (let* ((pr (git-appraise-db-get-pullreq))
-             (clean-msg (git-appraise-utils--comment-clean-msg
-                         (oref obj msg) default-buff-msg))
+             (clean-msg (git-appraise-comment-strip-known-helpers
+                         (oref obj msg)))
              (internal-id (uuidgen-4))
              (created-at (git-appraise-time-now-utc))
              (raw-comment `((author (login . ,(oref obj author)))
@@ -330,6 +330,7 @@ be found, so callers can rebuild."
                                               (updatedAt . ,(git-appraise-time-now-utc))))))))
         (git-appraise-backend-send-reply pr (oref obj id) clean-msg)
         (oset obj createdAt created-at)
+        (oset obj msg clean-msg)
         (oset obj state "SENT")
         (oset obj internalId internal-id)
         (oset pr raw-comments (append (oref pr raw-comments) (list raw-comment)))
@@ -348,9 +349,8 @@ be found, so callers can rebuild."
     (let* ((reply-pos (- (+ (oref obj position)
                           (length (split-string (oref obj msg) "\n")))
                        2))
-         (clean-msg (git-appraise-utils--comment-clean-msg
-                     (oref obj msg)
-                     default-buff-msg))
+         (clean-msg (git-appraise-comment-strip-known-helpers
+                     (oref obj msg)))
          (created-at (if (slot-boundp obj 'createdAt)
                          (oref obj createdAt)
                        (git-appraise-time-now-utc)))
@@ -369,6 +369,8 @@ be found, so callers can rebuild."
     (when (string-empty-p clean-msg)
       (user-error "Comment is empty"))
     (oset obj createdAt created-at)
+    ;; the in-place insert renders `msg': it must be the clean body
+    (oset obj msg clean-msg)
     (git-appraise-comment--save-draft obj raw-comment)
     (if (git-appraise-comment--insert-reply-in-place obj (git-appraise-pr-buffer-name))
         (git-appraise-comment--goto-saved-comment obj)
@@ -382,9 +384,8 @@ be found, so callers can rebuild."
   (let* ((buff-name (if git-appraise-comment-commit-buffer?
                         git-appraise-commit-buffer-name
                       (git-appraise-pr-buffer-name)))
-         (clean-msg (git-appraise-utils--comment-clean-msg
-                     (oref obj msg)
-                     default-buff-msg))
+         (clean-msg (git-appraise-comment-strip-known-helpers
+                     (oref obj msg)))
          (created-at (if (slot-boundp obj 'createdAt)
                          (oref obj createdAt)
                        (git-appraise-time-now-utc)))
@@ -411,10 +412,11 @@ be found, so callers can rebuild."
     (when (string-empty-p clean-msg)
       (user-error "Comment is empty"))
     (oset obj createdAt created-at)
+    ;; what the in-place insert renders is what gets saved or sent
+    (oset obj msg clean-msg)
     (if (oref obj send?)
         (let ((pr-id git-appraise-db--pullreq-id)
               (draft-id (and (slot-boundp obj 'internalId) (oref obj internalId))))
-          (oset obj msg clean-msg)
           (when (git-appraise-backend-repo-p (git-appraise-db-get-pullreq))
             (git-appraise-comment--save-draft obj raw-comment)
             (setq draft-id (oref obj internalId)))
