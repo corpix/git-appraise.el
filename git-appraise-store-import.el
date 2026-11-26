@@ -66,7 +66,7 @@ properties so values are safe to store later."
        (string-match-p git-appraise-store-import--fingerprint-regexp
                        (a-get record 'fingerprint))
        (memq (a-get record 'viewed) '(t :json-false))
-       (stringp (a-get record 'at)) (not (string-empty-p (a-get record 'at)))
+       (git-appraise-time-parse-utc (a-get record 'at))
        (stringp (a-get record 'id)) (not (string-empty-p (a-get record 'id)))
        (or (not (a-get record 'range)) (stringp (a-get record 'range)))))
 
@@ -79,7 +79,7 @@ properties so values are safe to store later."
        (stringp (a-get record 'path))
        (stringp (a-get record 'fingerprint))
        (stringp (a-get record 'actor))
-       (stringp (a-get record 'at))
+       (git-appraise-time-parse-utc (a-get record 'at))
        (stringp (a-get record 'id))
        (memq (a-get record 'folded) '(t :json-false))))
 
@@ -90,7 +90,7 @@ properties so values are safe to store later."
        (member (a-get record 'v) '(1 2))
        (equal (a-get record 'type) "pr-state")
        (stringp (a-get record 'id)) (not (string-empty-p (a-get record 'id)))
-       (stringp (a-get record 'at)) (not (string-empty-p (a-get record 'at)))
+       (git-appraise-time-parse-utc (a-get record 'at))
        (stringp (a-get record 'pr))))
 
 (defun git-appraise-store-import--kind (ref)
@@ -178,7 +178,7 @@ are counted in the second result."
                          (cond ((vectorp comments) (append comments nil))
                                ((listp comments) comments)
                                (t nil)))
-                        (a-get record 'at))
+                        (git-appraise-time-parse-utc (a-get record 'at)))
                   rows)
           (setq skipped (1+ skipped)))))
     (cons (nreverse rows) skipped)))
@@ -195,7 +195,7 @@ FLAG is the records' boolean key (`viewed' or `folded')."
                (a-get it 'fingerprint)
                (a-get it 'range)
                (if (eq (a-get it flag) t) 1 0)
-               (a-get it 'at))
+               (git-appraise-time-parse-utc (a-get it 'at)))
          records))
 
 (defun git-appraise-store-import--ref-plan (repo-key ref notes)
@@ -283,7 +283,7 @@ Return (STORED . DELETED): rows stored and refs removed."
            (`pr-state
             (git-appraise-store--insert-chunked
              db 'pr_state
-             '(repo revision actor v id feedback local_comments at)
+             '(repo revision actor v id feedback local_comments at_us)
              rows))
            (_
             (git-appraise-store--insert-chunked
@@ -292,10 +292,11 @@ Return (STORED . DELETED): rows stored and refs removed."
          (pcase-let ((`(,sql . ,params)
                       (git-appraise-sql-insert
                        :into 'legacy_imports
-                       :columns '(repo ref tip records skipped imported_at)
+                       :columns '(repo ref tip records skipped imported_at_us)
                        :rows (list (list repo-key ref tip
                                          (length rows) skipped
-                                         (git-appraise-time-now-utc t)))
+                                         (git-appraise-time-parse-utc
+                                          (git-appraise-time-now-utc t))))
                        :on-conflict :replace)))
            (sqlite-execute db sql params))
          (setq stored (+ stored (length rows))))))

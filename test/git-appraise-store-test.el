@@ -35,7 +35,9 @@ Binds `git-appraise-store-test--repo'."
        (delete-directory git-appraise-store-test--repo 'recursive))))
 
 (defun git-appraise-store-test--event (id &optional viewed range path at)
-  "A valid viewed event alist with ID, VIEWED flag and RANGE."
+  "A valid viewed event alist with ID, VIEWED flag and RANGE.
+AT defaults to a canonical stamp; the store returns timestamps
+normalized to six fractional digits."
   `((id . ,id)
     (actor . "tester@example.com")
     (item . ,(if range "hunk" "file"))
@@ -43,7 +45,7 @@ Binds `git-appraise-store-test--repo'."
     (fingerprint . ,(concat "sha256:" (make-string 64 ?a)))
     ,@(when range `((range . ,range)))
     (viewed . ,viewed)
-    (at . ,(or at "2026-01-01T00:00:00Z"))))
+    (at . ,(or at "2026-01-01T00:00:00.000000Z"))))
 
 ;;; req-2026-11-26-010: fresh initialization
 ;; covers: git-appraise-store-migrate git-appraise-store-migrations
@@ -100,21 +102,29 @@ Binds `git-appraise-store-test--repo'."
 (ert-deftest store/req-2026-11-26-013-failed-migration-leaves-schema-untouched ()
   "WHEN a migration fails midway THE SYSTEM SHALL roll the schema and version back and keep the connection usable."
   (git-appraise-store-test--with-db
-    (let ((db (git-appraise-store-db))
+    (let ((db (sqlite-open git-appraise-store-file))
           (broken-registry
            (vector (aref git-appraise-store-migrations 0)
                    (lambda (d)
                      (sqlite-execute d "CREATE TABLE extra (x)")
                      (error "boom")))))
-      (let ((git-appraise-store-migrations broken-registry))
-        (should-error (git-appraise-store-migrate db) :type 'error))
-      (should (= (git-appraise-store--user-version db) 1))
-      (should (= (length (sqlite-select
-                          db "SELECT name FROM sqlite_master WHERE name='extra'"))
-                 0))
-      ;; the same connection still migrates cleanly afterwards
-      (should (= (git-appraise-store-migrate db)
-                 (git-appraise-store-migrations-latest))))))
+      (unwind-protect
+          (progn
+            (let ((git-appraise-store-migrations broken-registry))
+              (should-error (git-appraise-store-migrate db) :type 'error))
+            ;; the whole run rolled back: migration 1's schema and
+            ;; version bump are gone along with the broken entry
+            (should (= (git-appraise-store--user-version db) 0))
+            (should (= (length (sqlite-select
+                                db "SELECT name FROM sqlite_master WHERE name='extra'"))
+                       0))
+            (should (= (length (sqlite-select
+                                db "SELECT name FROM sqlite_master WHERE name='viewed_events'"))
+                       0))
+            ;; the same connection still migrates cleanly afterwards
+            (should (= (git-appraise-store-migrate db)
+                       (git-appraise-store-migrations-latest))))
+        (ignore-errors (sqlite-close db))))))
 
 ;;; req-2026-11-24-001: events roundtrip
 ;; covers: git-appraise-store-append-events git-appraise-store-events
@@ -126,9 +136,9 @@ Binds `git-appraise-store-test--repo'."
     (git-appraise-store-test--with-repo
       (let* ((repo git-appraise-store-test--repo)
              (hunk (git-appraise-store-test--event "h1" t "-7,6 +8,7"
-                                                   nil "2026-01-01T00:00:00Z"))
+                                                   nil "2026-01-01T00:00:00.000000Z"))
              (file (git-appraise-store-test--event "f1" nil nil
-                                                   "src/b.el" "2026-01-01T00:00:01Z")))
+                                                   "src/b.el" "2026-01-01T00:00:01.000000Z")))
         (git-appraise-store-append-events repo "rev1" 'viewed (list hunk file))
         (git-appraise-store-append-events repo "rev1" 'fold
                                           (list `((id . "fd1")
@@ -313,6 +323,73 @@ Binds `git-appraise-store-test--repo'."
          repo "rev1" 'viewed (list (git-appraise-store-test--event "h1" t)))
         (should (git-appraise-store-contains-repo-p repo))
         (should-not (git-appraise-store-contains-repo-p nil))))))
+
+;;; req-2026-11-26-030: typed record time
+;; covers: git-appraise-time-parse-utc git-appraise-time-from-epoch-us
+;; covers-fn: git-appraise-store--event-row
+;; enforcement: test
+(ert-deftest store/req-2026-11-26-030-timestamps-order-numerically ()
+  "WHEN stamps of different precision order THE SYSTEM SHALL order them by actual time, not lexically."
+  (git-appraise-store-test--with-db
+    (git-appraise-store-test--with-repo
+      (let ((repo git-appraise-store-test--repo))
+        ;; second-precision stamp stored FIRST sorts before the
+        ;; half-second one; lexical text order would get this wrong
+        (git-appraise-store-append-events
+         repo "rev1" 'viewed
+         (list (git-appraise-store-test--event "h1" t nil nil
+                                               "2026-01-01T00:00:00Z")))
+        (git-appraise-store-append-events
+         repo "rev1" 'viewed
+         (list (git-appraise-store-test--event "h2" t nil nil
+                                               "2026-01-01T00:00:00.500000Z")))
+        (should (equal (--map (a-get it 'id)
+                              (git-appraise-store-events repo "rev1" 'viewed))
+                       '("h1" "h2")))
+        ;; both stamps read back in the canonical six-digit form
+        (should (equal (a-get (car (git-appraise-store-events
+                                    repo "rev1" 'viewed))
+                              'at)
+                       "2026-01-01T00:00:00.000000Z"))))))
+
+;;; req-2026-11-26-031: v1 to v2 upgrade converts timestamps
+;; covers: git-appraise-store-migrate git-appraise-store-migrations--timestamp-rebuild
+;; enforcement: test
+(ert-deftest store/req-2026-11-26-031-upgrade-converts-legacy-timestamps ()
+  "WHEN a v1 database upgrades THE SYSTEM SHALL convert every stored stamp to integer microseconds and keep it readable."
+  (git-appraise-store-test--with-db
+    (git-appraise-store-test--with-repo
+      (let* ((first (aref git-appraise-store-migrations 0))
+             (repo git-appraise-store-test--repo)
+             (repo-key (git-appraise-store-repo-key repo))
+             (db (sqlite-open git-appraise-store-file)))
+        (unwind-protect
+            (progn
+              ;; a v1 database with one ISO-stamped row
+              (let ((git-appraise-store-migrations (vector first)))
+                (git-appraise-store-migrate db)
+                (sqlite-execute
+                 db (concat "INSERT INTO viewed_events VALUES"
+                            " (?, 'rev1', 'h1', 'a@x', 'file', 'p', 'fp',"
+                            " NULL, 1, '2026-01-01T00:00:00Z')")
+                 (list repo-key)))
+              (sqlite-close db)
+              (setq git-appraise-store--db nil)
+              ;; an ordinary open upgrades through the real registry
+              (let ((events (git-appraise-store-events repo "rev1" 'viewed)))
+                (should (= (git-appraise-store--user-version
+                            (git-appraise-store-db))
+                           (git-appraise-store-migrations-latest)))
+                (should (= (length events) 1))
+                (should (equal (a-get (car events) 'at)
+                               "2026-01-01T00:00:00.000000Z"))
+                (let ((stamp (caar (sqlite-select
+                                    (git-appraise-store-db)
+                                    "SELECT at_us FROM viewed_events"))))
+                  (should (integerp stamp))
+                  (should (= stamp (git-appraise-time-parse-utc
+                                    "2026-01-01T00:00:00Z"))))))
+          (ignore-errors (sqlite-close db)))))))
 
 (provide 'git-appraise-store-test)
 ;;; git-appraise-store-test.el ends here

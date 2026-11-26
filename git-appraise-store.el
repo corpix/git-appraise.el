@@ -25,6 +25,7 @@
 
 (require 'git-appraise-sql)
 (require 'git-appraise-store-migrations)
+(require 'git-appraise-time)
 (require 'git-appraise-utils)
 
 (defcustom git-appraise-store-file
@@ -157,12 +158,12 @@ repository.  Memoized per session."
 (defun git-appraise-store--event-columns (kind)
   "The event columns an insert names, in row order."
   `(repo revision id actor item path fingerprint range
-         ,(git-appraise-store--flag kind) at))
+         ,(git-appraise-store--flag kind) at_us))
 
 (defun git-appraise-store--event-select-columns (kind)
   "The event columns a read returns, in row order."
   `(id actor item path fingerprint range
-       ,(git-appraise-store--flag kind) at))
+       ,(git-appraise-store--flag kind) at_us))
 
 (defun git-appraise-store--event-row (kind event repo-key revision)
   "The full insert row for event alist EVENT of KIND."
@@ -179,11 +180,12 @@ repository.  Memoized per session."
             (error "Bad %s flag in event %s"
                    (git-appraise-store--flag kind) (a-get event 'id)))
           (if (eq flag t) 1 0))
-        (or (a-get event 'at) (error "Event without at"))))
+        (or (git-appraise-time-parse-utc (a-get event 'at))
+            (error "Bad timestamp in event %s" (a-get event 'id)))))
 
 (defun git-appraise-store--row->event (kind row)
   "The event alist for a stored KIND row ROW."
-  (pcase-let ((`(,id ,actor ,item ,path ,fingerprint ,range ,flag ,at) row))
+  (pcase-let ((`(,id ,actor ,item ,path ,fingerprint ,range ,flag ,at-us) row))
     `((id . ,id)
       (actor . ,actor)
       (item . ,item)
@@ -191,7 +193,7 @@ repository.  Memoized per session."
       (fingerprint . ,fingerprint)
       ,@(when range `((range . ,range)))
       (,(git-appraise-store--flag kind) . ,(if (and flag (= flag 1)) t nil))
-      (at . ,at))))
+      (at . ,(git-appraise-time-from-epoch-us at-us)))))
 
 (defun git-appraise-store-events (repo revision kind)
   "All stored events of KIND for REPOSITORY REVISION, oldest first.
@@ -204,7 +206,7 @@ REPO, has no events."
                      :from (git-appraise-store--table kind)
                      :columns (git-appraise-store--event-select-columns kind)
                      :where `(:and (= repo ,repo-key) (= revision ,revision))
-                     :order-by '((at asc) (id asc))))
+                     :order-by '((at_us asc) (id asc))))
                    (rows (sqlite-select (git-appraise-store-db) sql params)))
         (--map (git-appraise-store--row->event kind it) rows))
     nil))
@@ -260,21 +262,21 @@ review-revision records over legacy ones."
       (pcase-let* ((`(,sql . ,params)
                     (git-appraise-sql-select
                      :from 'pr_state
-                     :columns '(v id feedback local_comments at)
+                     :columns '(v id feedback local_comments at_us)
                      :where `(:and (= repo ,repo-key)
                                    (= revision ,revision)
                                    (= actor ,actor))
-                     :order-by '((v desc) (at desc) (id desc))
+                     :order-by '((v desc) (at_us desc) (id desc))
                      :limit 1))
                    (row (car (sqlite-select (git-appraise-store-db)
                                             sql params))))
         (when row
-          (pcase-let ((`(,v ,id ,feedback ,comments ,at) row))
+          (pcase-let ((`(,v ,id ,feedback ,comments ,at-us) row))
             `((v . ,v)
               (id . ,id)
               (feedback . ,feedback)
               (local_comments . ,(git-appraise-store--decode-comments comments))
-              (at . ,at)))))
+              (at . ,(git-appraise-time-from-epoch-us at-us))))))
     nil))
 
 (defun git-appraise-store-save-pr-state (repo revision actor snapshot)
@@ -299,13 +301,14 @@ SNAPSHOT."
                            feedback)
                       (git-appraise-store--encode-comments
                        (a-get snapshot 'local_comments))
-                      (or (a-get snapshot 'at) (error "Snapshot without at"))))))
+                      (or (git-appraise-time-parse-utc (a-get snapshot 'at))
+                          (error "Bad timestamp in snapshot"))))))
     (git-appraise-store--call-in-write
      (lambda ()
        (pcase-let ((`(,sql . ,params)
                     (git-appraise-sql-insert
                      :into 'pr_state
-                     :columns '(repo revision actor v id feedback local_comments at)
+                     :columns '(repo revision actor v id feedback local_comments at_us)
                      :rows (list row)
                      :on-conflict :ignore)))
          (sqlite-execute db sql params))))
