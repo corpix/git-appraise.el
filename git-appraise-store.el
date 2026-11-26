@@ -108,9 +108,10 @@ Roll back on any non-local exit; return THUNK's result."
   "The rows of TABLE belonging to REPO-KEY."
   (unless (memq table git-appraise-store--tables)
     (error "Unknown table: %S" table))
-  (caar (sqlite-select db
-                       (format "SELECT count(*) FROM \"%s\" WHERE repo = ?" table)
-                       (list repo-key))))
+  (pcase-let ((`(,sql . ,params)
+               (git-appraise-sql-select :from table :count t
+                                        :where (list '= 'repo repo-key))))
+    (caar (sqlite-select db sql params))))
 
 (defun git-appraise-store-contains-repo-p (repo)
   "Non-nil when the store already holds any state for REPO."

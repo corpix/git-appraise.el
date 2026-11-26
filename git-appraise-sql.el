@@ -94,15 +94,20 @@ Return (SQL . PARAMS); a nil FORM compiles to the empty string."
 (defun git-appraise-sql-select (&rest spec)
   "Compile a SELECT from SPEC.  Return (SQL . PARAMS).
 Keys: :from TABLE, :columns (COLUMN... or *), :where FORM,
-:order-by ((COLUMN [asc|desc])...) and :limit N."
+:order-by ((COLUMN [asc|desc])...) and :limit N.  With :count
+non-nil the statement becomes SELECT count(*) and :columns is
+ignored."
   (let* ((table (plist-get spec :from))
-         (columns (or (plist-get spec :columns) '*))
+         (count (plist-get spec :count))
+         (columns (if count "count(*)"
+                    (git-appraise-sql--columns
+                     (or (plist-get spec :columns) '*))))
          (order-by (plist-get spec :order-by))
          (limit (plist-get spec :limit)))
     (unless table (error ":from is required"))
     (pcase-let* ((`(,where-sql . ,params) (git-appraise-sql--where
                                            (plist-get spec :where) nil)))
-      (cons (concat "SELECT " (git-appraise-sql--columns columns)
+      (cons (concat "SELECT " columns
                     " FROM " (git-appraise-sql--id table)
                     (if (equal where-sql "") "" (concat " WHERE " where-sql))
                     (if order-by
@@ -141,6 +146,61 @@ value per column in each ROW, and :on-conflict `ignore',
                                       rows)
                                ", "))
             (-flatten-n 1 rows))))
+
+(defun git-appraise-sql--column (spec)
+  "Compile one column spec (NAME TYPE &optional NOT-NULL),
+e.g. (repo :text :not-null) or (range :text)."
+  (let ((name (nth 0 spec))
+        (type (nth 1 spec))
+        (not-null (nth 2 spec)))
+    (unless (and (symbolp name) (memq type '(:text :integer)))
+      (error "Bad column spec: %S" spec))
+    (concat (git-appraise-sql--id name) " "
+            (upcase (if (keywordp type)
+                        (substring (symbol-name type) 1)
+                      (symbol-name type)))
+            (if not-null " NOT NULL" ""))))
+
+(defun git-appraise-sql-create-table (&rest spec)
+  "Compile a CREATE TABLE from SPEC.  Return (SQL . PARAMS).
+Keys: :name TABLE, :columns ((NAME :type :text|:integer [:not-null t])...),
+:primary-key (COLUMN...) and :without-rowid non-nil."
+  (let* ((table (plist-get spec :name))
+         (columns (plist-get spec :columns))
+         (primary-key (plist-get spec :primary-key))
+         (without-rowid (plist-get spec :without-rowid)))
+    (unless (and table columns) (error ":name and :columns are required"))
+    (cons (concat "CREATE TABLE " (git-appraise-sql--id table) " ("
+                  (string-join (-map #'git-appraise-sql--column columns) ", ")
+                  (if primary-key
+                      (concat ", PRIMARY KEY ("
+                              (git-appraise-sql--ids primary-key) ")")
+                    "")
+                  (if without-rowid ") WITHOUT ROWID" ")"))
+            nil)))
+
+(defun git-appraise-sql-rename-table (from to)
+  "Compile an ALTER TABLE RENAME from FROM to TO.  Return (SQL . PARAMS)."
+  (cons (concat "ALTER TABLE " (git-appraise-sql--id from)
+                " RENAME TO " (git-appraise-sql--id to))
+        nil))
+
+(defun git-appraise-sql-drop-table (name)
+  "Compile a DROP TABLE for NAME.  Return (SQL . PARAMS)."
+  (cons (concat "DROP TABLE " (git-appraise-sql--id name)) nil))
+
+(defun git-appraise-sql-pragma (name &optional value)
+  "Compile a PRAGMA statement for NAME.
+With VALUE (a number), compile an assignment; without, compile a
+read.  Return (SQL . PARAMS)."
+  (let ((name (if (keywordp name)
+                  (substring (symbol-name name) 1)
+                (symbol-name name))))
+    (unless (string-match-p "\\`[a-z][a-z0-9_-]*\\'" name)
+      (error "Unsafe pragma name: %S" name))
+    (if value
+        (cons (format "PRAGMA \"%s\" = %s" name value) nil)
+      (cons (format "PRAGMA \"%s\"" name) nil))))
 
 (defun git-appraise-sql-delete (&rest spec)
   "Compile a DELETE from SPEC: :from TABLE and :where FORM.

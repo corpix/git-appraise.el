@@ -6,13 +6,89 @@
 ;; `git-appraise-store-migrate' applies pending entries inside one
 ;; IMMEDIATE transaction, so the DDL and the version bump roll back
 ;; together, and two Emacs processes can never double-apply.
+;;
+;; The DDL is compiled by `git-appraise-sql' from the shared column
+;; specs below; migrations only declare what changed.
 
 ;;; Code:
 
 (require 'dash)
 (require 'sqlite)
 
+(require 'git-appraise-sql)
 (require 'git-appraise-time)
+
+(defun git-appraise-store-migrations--mark-columns (flag time type)
+  "Column specs for a marks table.
+FLAG is the boolean column (`viewed' or `folded'); TIME and TYPE
+are the record-time column -- (at :text) in v1, (at_us :integer)
+from v2 on."
+  `((repo :text :not-null)
+    (revision :text :not-null)
+    (id :text :not-null)
+    (actor :text :not-null)
+    (item :text :not-null)
+    (path :text :not-null)
+    (fingerprint :text :not-null)
+    (range :text)
+    (,flag :integer :not-null)
+    (,time ,type :not-null)))
+
+(defun git-appraise-store-migrations--pr-columns (time type)
+  "Column specs for pr_state; TIME and TYPE as in
+`git-appraise-store-migrations--mark-columns'."
+  `((repo :text :not-null)
+    (revision :text :not-null)
+    (actor :text :not-null)
+    (v :integer :not-null)
+    (id :text :not-null)
+    (feedback :text)
+    (local_comments :text :not-null)
+    (,time ,type :not-null)))
+
+(defun git-appraise-store-migrations--import-columns (time type)
+  "Column specs for legacy_imports; TIME and TYPE as in
+`git-appraise-store-migrations--mark-columns'."
+  `((repo :text :not-null)
+    (ref :text :not-null)
+    (tip :text :not-null)
+    (records :integer :not-null)
+    (skipped :integer :not-null)
+    (,time ,type :not-null)))
+
+(defun git-appraise-store-migrations--table (name columns primary-key)
+  "The CREATE TABLE statement for NAME with COLUMNS and PRIMARY-KEY."
+  (car (git-appraise-sql-create-table :name name :columns columns
+                                      :primary-key primary-key
+                                      :without-rowid t)))
+
+(defun git-appraise-store-migrations--v2-specs ()
+  "The v1 to v2 rebuild specs, one (TABLE NEW-COLUMNS PRIMARY-KEY
+OLD-TABLE OLD-COLUMNS) per table; NEW-COLUMNS are typed column
+specs, OLD-COLUMNS the v1 column names whose last entry holds the
+ISO stamp being converted to integer microseconds."
+  (list
+   (list 'viewed_events
+         (git-appraise-store-migrations--mark-columns 'viewed 'at_us :integer)
+         '(repo revision id)
+         'viewed_events_v1
+         '(repo revision id actor item path fingerprint range viewed at))
+   (list 'fold_events
+         (git-appraise-store-migrations--mark-columns 'folded 'at_us :integer)
+         '(repo revision id)
+         'fold_events_v1
+         '(repo revision id actor item path fingerprint range folded at))
+   (list 'pr_state
+         (git-appraise-store-migrations--pr-columns 'at_us :integer)
+         '(repo revision actor id)
+         'pr_state_v1
+         '(repo revision actor v id feedback local_comments at))
+   (list 'legacy_imports
+         (git-appraise-store-migrations--import-columns
+          'imported_at_us :integer)
+         '(repo ref)
+         'legacy_imports_v1
+         '(repo ref tip records skipped imported_at))))
 
 (defconst git-appraise-store-migrations
   (vector
@@ -23,51 +99,27 @@
    ;; rows by the primary key, so the per-review reads are plain
    ;; prefix scans.
    (lambda (db)
-     (--each
-         (list
-          "CREATE TABLE viewed_events (
-  repo TEXT NOT NULL,
-  revision TEXT NOT NULL,
-  id TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  item TEXT NOT NULL,
-  path TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  \"range\" TEXT,
-  viewed INTEGER NOT NULL,
-  at TEXT NOT NULL,
-  PRIMARY KEY (repo, revision, id)) WITHOUT ROWID"
-          "CREATE TABLE fold_events (
-  repo TEXT NOT NULL,
-  revision TEXT NOT NULL,
-  id TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  item TEXT NOT NULL,
-  path TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  \"range\" TEXT,
-  folded INTEGER NOT NULL,
-  at TEXT NOT NULL,
-  PRIMARY KEY (repo, revision, id)) WITHOUT ROWID"
-          "CREATE TABLE pr_state (
-  repo TEXT NOT NULL,
-  revision TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  v INTEGER NOT NULL,
-  id TEXT NOT NULL,
-  feedback TEXT,
-  local_comments TEXT NOT NULL,
-  at TEXT NOT NULL,
-  PRIMARY KEY (repo, revision, actor, id)) WITHOUT ROWID"
-          "CREATE TABLE legacy_imports (
-  repo TEXT NOT NULL,
-  ref TEXT NOT NULL,
-  tip TEXT NOT NULL,
-  records INTEGER NOT NULL,
-  skipped INTEGER NOT NULL,
-  imported_at TEXT NOT NULL,
-  PRIMARY KEY (repo, ref)) WITHOUT ROWID")
-       (sqlite-execute db it)))
+     (dolist (ddl (list
+                   (git-appraise-store-migrations--table
+                    'viewed_events
+                    (git-appraise-store-migrations--mark-columns
+                     'viewed 'at :text)
+                    '(repo revision id))
+                   (git-appraise-store-migrations--table
+                    'fold_events
+                    (git-appraise-store-migrations--mark-columns
+                     'folded 'at :text)
+                    '(repo revision id))
+                   (git-appraise-store-migrations--table
+                    'pr_state
+                    (git-appraise-store-migrations--pr-columns 'at :text)
+                    '(repo revision actor id))
+                   (git-appraise-store-migrations--table
+                    'legacy_imports
+                    (git-appraise-store-migrations--import-columns
+                     'imported_at :text)
+                    '(repo ref))))
+       (sqlite-execute db ddl)))
    ;; 2: record time becomes typed data -- integer microseconds
    ;; since the epoch instead of an ISO string.  Numeric ordering
    ;; no longer depends on a fixed-width text format (second- and
@@ -76,79 +128,46 @@
    ;; and receiving ISO strings.
    (lambda (db)
      (git-appraise-store-migrations--timestamp-rebuild
-      db
-      '(("viewed_events"
-         "CREATE TABLE viewed_events (
-  repo TEXT NOT NULL,
-  revision TEXT NOT NULL,
-  id TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  item TEXT NOT NULL,
-  path TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  \"range\" TEXT,
-  viewed INTEGER NOT NULL,
-  at_us INTEGER NOT NULL,
-  PRIMARY KEY (repo, revision, id)) WITHOUT ROWID"
-         "SELECT repo, revision, id, actor, item, path, fingerprint, \"range\", viewed, at FROM viewed_events_v1")
-        ("fold_events"
-         "CREATE TABLE fold_events (
-  repo TEXT NOT NULL,
-  revision TEXT NOT NULL,
-  id TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  item TEXT NOT NULL,
-  path TEXT NOT NULL,
-  fingerprint TEXT NOT NULL,
-  \"range\" TEXT,
-  folded INTEGER NOT NULL,
-  at_us INTEGER NOT NULL,
-  PRIMARY KEY (repo, revision, id)) WITHOUT ROWID"
-         "SELECT repo, revision, id, actor, item, path, fingerprint, \"range\", folded, at FROM fold_events_v1")
-        ("pr_state"
-         "CREATE TABLE pr_state (
-  repo TEXT NOT NULL,
-  revision TEXT NOT NULL,
-  actor TEXT NOT NULL,
-  v INTEGER NOT NULL,
-  id TEXT NOT NULL,
-  feedback TEXT,
-  local_comments TEXT NOT NULL,
-  at_us INTEGER NOT NULL,
-  PRIMARY KEY (repo, revision, actor, id)) WITHOUT ROWID"
-         "SELECT repo, revision, actor, v, id, feedback, local_comments, at FROM pr_state_v1")
-        ("legacy_imports"
-         "CREATE TABLE legacy_imports (
-  repo TEXT NOT NULL,
-  ref TEXT NOT NULL,
-  tip TEXT NOT NULL,
-  records INTEGER NOT NULL,
-  skipped INTEGER NOT NULL,
-  imported_at_us INTEGER NOT NULL,
-  PRIMARY KEY (repo, ref)) WITHOUT ROWID"
-         "SELECT repo, ref, tip, records, skipped, imported_at FROM legacy_imports_v1")))))
+      db (git-appraise-store-migrations--v2-specs))))
   "Ordered schema migrations; entry N brings the database to
 version N+1.  Never edit an entry that shipped: add a new one.")
 
+(defun git-appraise-store-migrations--copy-row (db table new-columns row)
+  "Copy one OLD-TABLE ROW into TABLE, converting its trailing
+stamp with `git-appraise-time-parse-utc' (unparseable stamps keep
+0, the epoch)."
+  (let ((values (append (butlast row)
+                        (list (or (git-appraise-time-parse-utc
+                                   (-last-item row))
+                                  0)))))
+    (let ((ins (git-appraise-sql-insert
+                :into table
+                :columns (-map #'car new-columns)
+                :rows (list values))))
+      (sqlite-execute db (car ins) (cdr ins)))))
+
 (defun git-appraise-store-migrations--timestamp-rebuild (db specs)
-  "Rebuild each table in SPECS, converting its ISO `at' column.
-Each spec is (TABLE NEW-DDL SELECT-FROM-OLD): the old table is
-renamed, the new DDL creates the typed replacement, every old row
-is copied with `git-appraise-time-parse-utc' applied to the last
-column, then the old table is dropped.  Unparseable stamps keep
-0 (the epoch) rather than aborting an upgrade."
-  (pcase-dolist (`(,table ,ddl ,select) specs)
-    (sqlite-execute db (format "ALTER TABLE %s RENAME TO %s_v1" table table))
-    (sqlite-execute db ddl)
-    (dolist (row (sqlite-select db select))
-      (let* ((stamp (-last-item row))
-             (values (append (butlast row)
-                             (list (or (git-appraise-time-parse-utc stamp) 0)))))
-        (sqlite-execute
-         db (concat "INSERT OR IGNORE INTO " table " VALUES ("
-                    (string-join (make-list (length values) "?") ", ") ")")
-         values)))
-    (sqlite-execute db (format "DROP TABLE %s_v1" table))))
+  "Rebuild each table in SPECS with a typed record-time column.
+Each spec is (TABLE NEW-COLUMNS PRIMARY-KEY OLD-TABLE OLD-COLUMNS):
+the v1 table is renamed out of the way, the replacement is created
+from NEW-COLUMNS, every copied row has its trailing stamp parsed
+with `git-appraise-time-parse-utc' (unparseable stamps keep 0, the
+epoch, rather than aborting an upgrade), and the old table is
+dropped."
+  (pcase-dolist (`(,table ,new-columns ,primary-key ,old-table ,old-columns)
+                 specs)
+    (let ((rows (sqlite-select
+                 db (car (git-appraise-sql-select
+                          :from table :columns old-columns)))))
+      (sqlite-execute db (car (git-appraise-sql-rename-table table old-table)))
+      (sqlite-execute db (car (git-appraise-sql-create-table
+                               :name table :columns new-columns
+                               :primary-key primary-key
+                               :without-rowid t)))
+      (dolist (row rows)
+        (git-appraise-store-migrations--copy-row db table new-columns row))
+      (sqlite-execute db (car (git-appraise-sql-drop-table old-table))))))
+
 
 (defun git-appraise-store-migrations-latest ()
   "The newest schema version this package understands."
@@ -156,7 +175,7 @@ column, then the old table is dropped.  Unparseable stamps keep
 
 (defun git-appraise-store--user-version (db)
   "The schema version of the open database DB."
-  (caar (sqlite-select db "PRAGMA user_version")))
+  (caar (sqlite-select db (car (git-appraise-sql-pragma 'user_version)))))
 
 (defun git-appraise-store-migrate (db)
   "Bring the open database DB to the newest schema version.
@@ -180,7 +199,8 @@ the resulting version."
                   (when (>= i version)
                     (funcall (aref git-appraise-store-migrations i) db)
                     (sqlite-execute
-                     db (format "PRAGMA user_version = %d" (1+ i)))))
+                     db (car (git-appraise-sql-pragma
+                              'user_version (1+ i))))))
                 (sqlite-execute db "COMMIT")
                 (git-appraise-store--user-version db))
             (setq committed t)))
