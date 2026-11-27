@@ -53,9 +53,16 @@ on an older commit appear folded under their file with their original path,
 line, and commit. The file heading shows a comment count while folded.
 Comments without a line appear in Conversation. Files start folded; hunks
 without saved choices open when you open their file. `TAB`, `S-TAB`, and the
-`r` menu save fold choices in a personal Git note. The CLI
+`r` menu save fold choices in the personal SQLite store. The CLI
 cannot create a comment on a removed line of
 the current diff because that line is absent from the review head file.
+
+Use `r D` in a review buffer, or `? R D` from Magit, to remove a local review.
+After confirmation, this removes the request and discussion notes for its
+commit and clears its local drafts, viewed marks, and folds. The commit is not
+deleted, and no garbage collection runs. Removing only the request note with
+`git notes` leaves the separate discussion note; requesting the same commit
+again then brings back its old comments and decision.
 
 `TAB` on a listed commit folds the commits group and returns to its heading.
 

@@ -112,6 +112,17 @@ Roll back on any non-local exit; return THUNK's result."
                 git-appraise-store--tables))
     nil))
 
+(defun git-appraise-store-clear-review (repo revision)
+  "Delete personal state for REPO's REVIEW REVISION in one transaction."
+  (when-let* ((key (git-appraise-store-repo-key repo)))
+    (git-appraise-store--call-in-write
+     (lambda ()
+       (--each git-appraise-store--tables
+         (emacsql git-appraise-store--db
+                  [:delete :from $i1
+                   :where (and (= repo $s2) (= revision $s3))]
+                  it key revision))))))
+
 ;;; Repository identity
 
 (defun git-appraise-store-repo-key (repo)

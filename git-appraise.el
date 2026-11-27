@@ -24,6 +24,7 @@
 (require 'git-appraise-db)
 (require 'git-appraise-faces)
 (require 'git-appraise-actions)
+(require 'git-appraise-remove)
 (require 'git-appraise-folding)
 (declare-function git-appraise-viewed-mark-and-fold "git-appraise-folding")
 (declare-function git-appraise-viewed-mark-file-and-fold "git-appraise-folding")
@@ -118,6 +119,7 @@ offers local reviews instead of prompting for a URL."
     ("n" "New" git-appraise-backend-request)]
    ["Manage"
     ("a" "Abandon" git-appraise-abandon-review)
+    ("D" "Remove local review" git-appraise-remove-review)
     ("b" "Rebase" git-appraise-rebase-review)
     ("l" "Land review" git-appraise-land-review)
     ("p" "Push" git-appraise-push-notes)
@@ -161,6 +163,7 @@ offers local reviews instead of prompting for a URL."
     ("q" "Quit" transient-quit-one)]
    ["Manage"
     ("A" "Abandon" git-appraise-abandon-current-review)
+    ("D" "Remove local review" git-appraise-remove-current-review)
     ("b" "Rebase" git-appraise-rebase-current-review)
     ("L" "Land review" git-appraise-land-current-review)
     ("p" "Push" git-appraise-push-notes)

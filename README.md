@@ -80,9 +80,16 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `r l` | Accept with the configured LGTM message |
 | Review buffer | `r s c` | Send a general comment |
 | Review buffer | `r A` | Abandon the current review |
+| Review buffer | `r D` | Remove the local review, discussion, and personal state |
 | Review buffer | `r b` | Rebase the current review onto its target |
 | Review buffer | `r L` | Land the current review into its target |
 | Review buffer | `r p` / `r P` | Push or pull git-appraise notes |
+
+Removing a review requires confirmation. It removes the request and discussion
+notes for that commit plus its local viewed marks, folds, and drafts. The Git
+commit remains available for a new review; no garbage collection runs. Removing
+only the request note with Git leaves the separate discussion note, so a new
+request on the same commit inherits old comments and decisions.
 
 `C-c C-r` publishes a native `-lgtm` reply to the selected finding, so its
 thread is resolved in git-appraise and can be exported with its notes.
