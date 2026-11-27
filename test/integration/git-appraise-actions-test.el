@@ -279,7 +279,8 @@
     (with-current-buffer (git-appraise-pr-buffer-name)
       (should (eq (key-binding (kbd "g")) 'revert-buffer))
       (should (eq (key-binding (kbd "G")) 'git-appraise-reload))
-      (revert-buffer nil t))
+      (let ((git-appraise-db--pullreq-id nil))
+        (revert-buffer nil t)))
     (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
     (with-current-buffer (git-appraise-pr-buffer-name)
       (should (string-match-p "Standard[ \t\n]+refresh[ \t\n]+comment"

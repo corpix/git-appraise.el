@@ -26,6 +26,7 @@
                   "git-appraise-comment-draft" (path buff-name))
 (declare-function git-appraise-lazy-placeholder-section-p "git-appraise-lazy"
                   (section))
+(declare-function git-appraise--sync-db-pullreq "git-appraise-section")
 
 (defcustom git-appraise-lgtm-message "LGTM! :thumbsup:"
   "Message to add to fast track LGTM git-appraise."
@@ -436,6 +437,8 @@ If FEEDBACK is provided, use it.  If ONLY-REPLY? is non-nil, submit replies."
 (defun git-appraise-reload ()
   "Reload the buffer."
   (interactive)
+  (when (derived-mode-p 'git-appraise-mode)
+    (git-appraise--sync-db-pullreq))
   (let ((pr (git-appraise-db-get-pullreq))
         (git-appraise-section-full-refresh? t)
         ;; the anchor is this reload's intent only: leaving it set
