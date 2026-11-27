@@ -28,6 +28,7 @@
             jq
             ((emacsPackagesFor emacs).emacsWithPackages (
               epkgs: with epkgs; [
+                emacsql
                 magit
                 transient
                 a
