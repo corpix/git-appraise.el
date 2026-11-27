@@ -163,7 +163,6 @@ The creation flow must run even when the global backend is `url'."
         (should (cl-some (lambda (c) (string-match-p "last -" (car c)))
                          captured))))))
 
-;;; git-appraise-backend-request-test.el ends here
 
 ;;; req-2026-11-24-107: review commits are visible
 ;; covers: git-appraise-backend.el git-appraise-section-header.el
@@ -277,3 +276,4 @@ The creation flow must run even when the global backend is `url'."
           (when (buffer-live-p buffer)
             (kill-buffer buffer)))))))
 
+;;; git-appraise-backend-request-test.el ends here

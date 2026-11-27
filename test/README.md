@@ -1,7 +1,7 @@
 # Test suite
 
 `just test` runs the ERT suite in batch Emacs. Pass an ERT name or regexp as
-the selector, for example `just test 'workflow/'`. The runner loads files in
+the selector, for example `just test 'review-journey/'`. The runner loads files in
 the order `unit/`, `integration/`, `workflow/`, with names sorted inside each
 directory.
 
