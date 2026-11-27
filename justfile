@@ -38,6 +38,14 @@ compile:
 test selector="t":
     ERT_SELECTOR='{{selector}}' {{emacs}} -Q --batch {{load_path}} -l test/run-tests.el
 
+# Time a real 200-file region v action in disposable review state.
+bench:
+    {{emacs}} -Q --batch {{load_path}} -l test/performance/viewed.el
+
+# Capture CPU and memory profiles for the same action under tmp/performance/.
+profile:
+    GIT_APPRAISE_PROFILE=1 {{emacs}} -Q --batch {{load_path}} -l test/performance/viewed.el
+
 # Compile then test.
 check: compile test
 

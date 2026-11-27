@@ -354,8 +354,9 @@ mark/unmark within one second must still order deterministically
        (git-appraise-db--pullreq-raw-diff))
       (git-appraise-viewed-changes--paint))))
 
-(defun git-appraise-viewed--completion-snapshot (path items viewed actor)
-  "Return a snapshot row when marking ITEMS completes viewing PATH."
+(defun git-appraise-viewed--completion-snapshot (path items viewed actor &optional blocks)
+  "Return a snapshot row when marking ITEMS completes viewing PATH.
+BLOCKS, when non-nil, maps paths to diff blocks already split by the caller."
   (when viewed
     (let* ((entry (and (hash-table-p git-appraise-section--viewed)
                        (gethash path git-appraise-section--viewed)))
@@ -366,9 +367,11 @@ mark/unmark within one second must still order deterministically
           (cl-pushnew (cdr it) seen :test #'equal)))
       (when (or (and (equal total 1) (null (cdr (car items))))
                 (and total (= (length seen) total)))
-        (when-let* ((block (cdr (assoc path
-                                       (git-appraise--diff--split-by-files
-                                        (git-appraise-db--pullreq-raw-diff))))))
+        (when-let* ((block (if blocks
+                              (gethash path blocks)
+                            (cdr (assoc path
+                                        (git-appraise--diff--split-by-files
+                                         (git-appraise-db--pullreq-raw-diff)))))))
           (list actor path block))))))
 
 (defun git-appraise-viewed--write-events (path items viewed)
@@ -437,11 +440,17 @@ buffer update only after the commit."
      ((not actor)
       (user-error "Set git user.email in %s to store viewed marks" repo))
      (t
-      (let (events snapshots)
+      (let ((blocks (when (--any? (nth 2 it) groups)
+                      (let ((table (make-hash-table :test #'equal)))
+                        (--each (git-appraise--diff--split-by-files
+                                 (git-appraise-db--pullreq-raw-diff))
+                          (puthash (car it) (cdr it) table))
+                        table)))
+            events snapshots)
         (dolist (group groups)
           (pcase-let ((`(,path ,items ,viewed) group))
             (when-let* ((snapshot (git-appraise-viewed--completion-snapshot
-                                   path items viewed actor)))
+                                   path items viewed actor blocks)))
               (push snapshot snapshots))
             (dolist (item items)
               (push (git-appraise-viewed--make-event

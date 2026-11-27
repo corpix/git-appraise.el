@@ -23,3 +23,17 @@ Every test that represents a user-visible requirement keeps its stable
 `covers:` metadata above its primary guard. Test files have no `provide` form.
 Temporary repositories and file-backed SQLite databases are deleted by their
 fixtures. The suite never opens the user's review store.
+
+## Bulk viewed performance
+
+`just bench` creates a disposable 200-file review, selects the file headings,
+and invokes the review buffer's `v` binding to mark and unmark them. It reports
+elapsed time for each action and call counts/timings for its main phases. Fixture
+creation and rendering are excluded from the action timings. The fixture uses an
+in-memory SQLite store and never contacts the live Emacs daemon.
+
+`just profile` runs the same case with Emacs's CPU and memory profilers. Expanded
+text reports and loadable `.prof` files are written to ignored
+`tmp/performance/`. Compare benchmark results on the same machine before and
+after a change. The regular ERT suite checks bounded full-review work and
+correct state for 200 files; elapsed time is diagnostic, not a CI threshold.
