@@ -276,4 +276,78 @@ The creation flow must run even when the global backend is `url'."
           (when (buffer-live-p buffer)
             (kill-buffer buffer)))))))
 
+;;; req-2026-11-27-018: tracked edits stop creation before review prompts
+;; covers: git-appraise-backend-read.el
+;; covers-fn: git-appraise-backend--read-request, git-appraise-backend--request-untracked-choice
+;; enforcement: test
+(ert-deftest git-appraise-backend-request/req-2026-11-27-018-tracked-changes-stop-early ()
+  "WHEN tracked changes are uncommitted THE SYSTEM SHALL stop review creation before asking for review details."
+  (git-appraise-backend-request-test-with-repo
+    (with-temp-file (expand-file-name "example.txt" directory)
+      (insert "Changed after the commit\n"))
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (&rest _) (ert-fail "Review details were requested")))
+              ((symbol-function 'y-or-n-p)
+               (lambda (&rest _) (ert-fail "Unexpected confirmation prompt"))))
+      (should-error (git-appraise-backend-request) :type 'user-error))
+    (should-not (git-appraise-backend-list directory)))
+  (git-appraise-backend-request-test-with-repo
+    (with-temp-file (expand-file-name "example.txt" directory)
+      (insert "Staged after the commit\n"))
+    (git-appraise-test--run directory "git" "add" "example.txt")
+    (with-temp-file (expand-file-name "untracked.txt" directory)
+      (insert "Untracked too\n"))
+    (cl-letf (((symbol-function 'read-string)
+               (lambda (&rest _) (ert-fail "Review details were requested")))
+              ((symbol-function 'y-or-n-p)
+               (lambda (&rest _) (ert-fail "Unexpected confirmation prompt"))))
+      (should-error (git-appraise-backend-request) :type 'user-error))
+    (should-not (git-appraise-backend-list directory))))
+
+;;; req-2026-11-27-019: untracked files can be excluded after early notice
+;; covers: git-appraise-backend-read.el
+;; covers-fn: git-appraise-backend--read-request, git-appraise-backend--create
+;; enforcement: test
+(ert-deftest git-appraise-backend-request/req-2026-11-27-019-untracked-continue ()
+  "WHEN only untracked files exist THE SYSTEM SHALL explain their exclusion before accepting review details and create the review if confirmed."
+  (git-appraise-backend-request-test-with-repo
+    (with-temp-file (expand-file-name "untracked.txt" directory)
+      (insert "Not in the review\n"))
+    (let ((answers '("feature" "master" "Review without untracked" ""))
+          order)
+      (cl-letf (((symbol-function 'y-or-n-p)
+                 (lambda (prompt)
+                   (should (string-match-p "Untracked files" prompt))
+                   (push 'warning order)
+                   t))
+                ((symbol-function 'read-string)
+                 (lambda (&rest _)
+                   (push 'detail order)
+                   (pop answers))))
+        (should (equal (git-appraise-backend-request) revision)))
+      (should (equal (nreverse order)
+                     '(warning detail detail detail detail)))
+      (should-not answers))
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (should (= 1 (length (git-appraise-backend-list directory))))
+    (should (file-exists-p (expand-file-name "untracked.txt" directory)))
+    (should (equal (git-appraise-test--run directory "git" "status"
+                                           "--porcelain=v1" "--untracked-files=all")
+                   "?? untracked.txt"))))
+
+;;; req-2026-11-27-020: declining untracked exclusion cancels early
+;; covers: git-appraise-backend-read.el
+;; covers-fn: git-appraise-backend--request-untracked-choice
+;; enforcement: test
+(ert-deftest git-appraise-backend-request/req-2026-11-27-020-untracked-decline ()
+  "WHEN a user declines to omit untracked files THE SYSTEM SHALL cancel review creation before asking for details."
+  (git-appraise-backend-request-test-with-repo
+    (with-temp-file (expand-file-name "untracked.txt" directory)
+      (insert "Not in the review\n"))
+    (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) nil))
+              ((symbol-function 'read-string)
+               (lambda (&rest _) (ert-fail "Review details were requested"))))
+      (should-error (git-appraise-backend-request) :type 'user-error))
+    (should-not (git-appraise-backend-list directory))))
+
 ;;; git-appraise-backend-request-test.el ends here

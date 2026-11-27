@@ -13,6 +13,9 @@ prompts for the source branch, target branch, message, and reviewers, runs
 current branch, the target to the remote's default branch, and an empty message
 to the reviewed commit's message. A review already open for the same commit is
 reported instead of creating a duplicate.
+Before asking for branches or a message, Emacs stops if tracked changes are
+uncommitted. With only untracked files, it asks whether to continue; those
+files are not part of the review.
 
 Keep the same review while the source branch gains fix commits. Its anchor is
 the first reviewed commit; the current branch tip supplies the evolving diff.

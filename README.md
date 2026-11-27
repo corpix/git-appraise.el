@@ -30,6 +30,9 @@ none, Emacs offers to create one. You can also run
 cover the source branch, target branch, message, and optional reviewers. An
 empty message uses the reviewed commit's message. In Magit status or revision,
 press `? R`, then `o` to open a review or `n` to create one.
+Creation checks the working tree before asking for branches or a message.
+Tracked changes must be committed or stashed first. If only untracked files
+remain, Emacs asks whether to proceed without including them in the review.
 
 See [Local git-appraise reviews](docs/git-appraise.md) for the CLI setup and a
 full local workflow.

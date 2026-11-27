@@ -103,12 +103,15 @@ ref in the local repository."
       (user-error "No commits to review between %s and %s" source target-ref))
     (car commits)))
 
-(defun git-appraise-backend--create (root message source target reviewers)
+(defun git-appraise-backend--create (root message source target reviewers
+                                        &optional allow-uncommitted)
   "Create a review in ROOT and return its revision.
 MESSAGE may be empty, in which case git-appraise uses the commit
 message.  SOURCE is the revision to review and TARGET the branch to
-review against.  REVIEWERS is a list of names.  Signal `user-error'
-when an open review already covers the same commit."
+review against.  REVIEWERS is a list of names.  ALLOW-UNCOMMITTED
+passes the CLI override after the interactive warning for untracked
+files.  Signal `user-error' when an open review already covers the
+same commit."
   (let* ((source-ref (let ((full (ignore-errors
                                    (git-appraise-backend--git
                                     root "rev-parse" "--symbolic-full-name"
@@ -132,6 +135,8 @@ when an open review already covers the same commit."
     (apply #'git-appraise-backend--run
            root
            (append (list "request" "-quiet")
+                   (when allow-uncommitted
+                     (list "-allow-uncommitted"))
                    (unless (string-empty-p (string-trim (or message "")))
                      (list "-m" message))
                    (list "-source" source-ref "-target" target-ref)
@@ -143,20 +148,39 @@ when an open review already covers the same commit."
       (user-error "git-appraise did not report the new review"))
     review-commit))
 
+(defun git-appraise-backend--request-untracked-choice (root)
+  "Check ROOT before review prompts; return non-nil to allow untracked files."
+  (let* ((lines (split-string
+                 (git-appraise-backend--git root "status" "--porcelain=v1"
+                                            "--untracked-files=normal")
+                 "\n" t))
+         (tracked (--any? (not (string-prefix-p "?? " it)) lines)))
+    (cond
+     (tracked
+      (user-error "Commit or stash tracked changes before creating a git-appraise review"))
+     ((null lines) nil)
+     ((y-or-n-p
+       "Untracked files will not be included in the review; continue anyway? ")
+      t)
+     (t
+      (user-error "Review creation cancelled; untracked files remain")))))
+
 (defun git-appraise-backend--read-request (root)
   "Prompt for a new review in ROOT.
-Return a list (MESSAGE SOURCE TARGET REVIEWERS)."
+Return a list (MESSAGE SOURCE TARGET REVIEWERS ALLOW-UNCOMMITTED)."
   (let ((branch (git-appraise-backend--git root "rev-parse" "--abbrev-ref" "HEAD")))
     (when (equal branch "HEAD")
       (user-error "Check out a branch before creating a review"))
-    (let* ((source (read-string "Source branch: " branch))
+    (let* ((allow-uncommitted
+            (git-appraise-backend--request-untracked-choice root))
+           (source (read-string "Source branch: " branch))
            (target (read-string "Target branch: "
                                 (git-appraise-backend--default-target root)))
            (message (read-string "Review message (empty uses the commit message): "))
            (reviewers (split-string
                        (read-string "Reviewers (comma separated, optional): ")
                        "," t "[ \t\n]+")))
-      (list message source target reviewers))))
+      (list message source target reviewers allow-uncommitted))))
 
 (defun git-appraise-backend--short-ref (ref)
   "Return REF as a short branch name for display."
