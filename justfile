@@ -12,7 +12,7 @@ deps:
       --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
       --eval "(package-initialize)" \
       --eval "(package-refresh-contents)" \
-      --eval "(dolist (p (quote (a magit transient uuidgen deferred markdown-mode emojify s dash emacsql))) \
+      --eval "(dolist (p (quote (a magit transient uuidgen deferred markdown-mode emojify s dash emacsql svg-lib))) \
                (unless (package-installed-p p) (package-install p)))" \
       --eval "(message \"deps ok\")"
 

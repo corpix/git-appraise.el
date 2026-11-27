@@ -458,8 +458,10 @@ Return non-nil when an existing feedback section was updated."
                 (magit-insert-section (git-appraise-feedback-section obj)
                   (if feedback
                       (insert feedback)
-                    (insert (propertize "Leave a comment here."
+                    (insert (propertize "No draft yet."
                                         'font-lock-face 'magit-dimmed)))))
+              (git-appraise-section--set-feedback-badge-in-place
+               section feedback)
               (set-marker start nil)
               (set-marker end nil))
             t))))))

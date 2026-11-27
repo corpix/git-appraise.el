@@ -201,7 +201,7 @@ THE SYSTEM SHALL keep a single comment heading in the review buffer."
             (git-appraise-comment-handler-commit comment git-appraise-comment-buffer-msg))
           (goto-char (point-min))
           (let ((count 0))
-            (while (search-forward "Comment by YOU" nil t)
+            (while (search-forward "[DRAFT] YOU" nil t)
               (cl-incf count))
             (should (= count 1)))
           (goto-char (point-min))
@@ -275,8 +275,8 @@ THE SYSTEM SHALL remove the helper text from the saved comment."
                              (eq (overlay-get ov 'git-appraise-comment-border)
                                  'bottom))
                            rules)))
-              (should (string-match-p
-                       "Comment by"
+              (should (string-search
+                       "[COMMENT]"
                        (buffer-substring-no-properties
                         (overlay-start top) (overlay-end top))))
               (should (string-match-p

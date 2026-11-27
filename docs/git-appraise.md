@@ -61,7 +61,8 @@ notes; `r P` pulls teammates' review notes. The explicit `r L` command lands a
 review into its target. Comments
 on an older commit appear folded under their file with their original path,
 line, and commit. The file heading shows a comment count while folded.
-Comments without a line appear in Conversation. Files start folded; hunks
+Comments without a line appear in Discussion. Its folded headings show compact
+status badges and counts; timestamps appear inside opened sections. Files start folded; hunks
 without saved choices open when you open their file. `TAB`, `S-TAB`, and the
 `r` menu save fold choices in the personal SQLite store. The CLI
 cannot create a comment on a removed line of

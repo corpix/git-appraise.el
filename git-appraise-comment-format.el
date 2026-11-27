@@ -6,7 +6,10 @@
 ;;; Code:
 
 (require 'time-date)
+(require 'subr-x)
 (require 'git-appraise-faces)
+(require 'git-appraise-badges)
+(require 'dash)
 
 (defun git-appraise-comment-format-time (timestamp &optional now)
   "Format TIMESTAMP for a comment relative to local time NOW.
@@ -33,21 +36,43 @@ date string or an Emacs time value.  Return nil when it is nil."
 
 (defun git-appraise-comment-format-heading (kind author timestamp &optional statuses)
   "Build a KIND comment heading for AUTHOR at TIMESTAMP.
-KIND is \"Comment\" or \"Reply\".  STATUSES is a list of short
-labels such as \"DRAFT\" or \"OUTDATED\"."
+TIMESTAMP is displayed in the opened section body.  STATUSES is a
+list of short labels such as \"DRAFT\" or \"OUTDATED\"."
+  (ignore timestamp)
   (let* ((who (or author "unknown"))
-         (statuses (if (listp statuses) statuses (list statuses)))
-         (time (git-appraise-comment-format-time timestamp)))
+         (statuses (--map (if (and (equal kind "Reply")
+                                     (equal it "APPROVED"))
+                                "RESOLVED" it)
+                          (--filter it (if (listp statuses) statuses
+                                         (list statuses)))))
+         (promoted (and (equal kind "Comment")
+                        (--first (member it '("APPROVED" "LGTM"
+                                              "CHANGES_REQUESTED"
+                                              "NEEDS_WORK" "DRAFT"))
+                                 statuses)))
+         (primary (or promoted kind))
+         (secondary (if promoted (remove promoted statuses) statuses)))
     (concat
-     (propertize (format "%s by " kind) 'face 'magit-section-heading)
+     (git-appraise-badge primary) " "
      (propertize who 'face 'git-appraise-author-face)
      (mapconcat (lambda (status)
-                  (concat " · "
-                          (propertize (replace-regexp-in-string "_" " " status)
-                                      'face 'git-appraise-state-face)))
-                (delq nil statuses) "")
-     (when time
-       (concat " · " (propertize time 'face 'git-appraise-timestamp-face))))))
+                  (concat " " (git-appraise-badge status)))
+                secondary ""))))
+
+(defun git-appraise-comment-format-time-detail (label timestamp)
+  "Return a highlighted LABEL and TIMESTAMP line for an opened section."
+  (when-let* ((time (git-appraise-comment-format-time timestamp)))
+    (concat "  " (propertize label 'font-lock-face 'magit-dimmed) "  "
+            (propertize time 'font-lock-face 'git-appraise-timestamp-face)
+            "\n")))
+
+(defun git-appraise-comment-format-time-details (created updated)
+  "Return posted and, when different, edited times for a comment."
+  (concat
+   (or (git-appraise-comment-format-time-detail "Posted" created) "")
+   (if (and updated (not (equal created updated)))
+       (or (git-appraise-comment-format-time-detail "Edited" updated) "")
+     "")))
 
 (provide 'git-appraise-comment-format)
 ;;; git-appraise-comment-format.el ends here

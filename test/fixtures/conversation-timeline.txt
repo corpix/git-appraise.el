@@ -1,30 +1,38 @@
-Conversation (5) · last 3 Jan 09:00
-General comments (2) · 1 Jan 08:00
-  ↳ diff dave on example.txt:1 · 20 Dec 2025 08:00 · CHANGES_REQUESTED
+Discussion (5)
+  Latest activity  3 Jan 09:05
+General (2)
+  Latest activity  1 Jan 08:00
+  [NEEDS WORK] ↳ dave · example.txt:1
+  Posted  20 Dec 2025 08:00
 
  Earlier
  note
 
-Comment by carol · 1 Jan 08:00
+[COMMENT] carol
+  Posted  1 Jan 08:00
 
  Stray
  top-level
 
 
-Review: alice · COMMENTED (2) · 2 Jan 10:00
-Summary
+alice [COMMENT] (2)
+  Latest activity  2 Jan 11:00
+Note
 
  Review
  body
 
-  ↳ diff example.txt:2 · 2 Jan 11:00
+  [COMMENT] ↳ example.txt:2
+  Posted  2 Jan 11:00
 
  Inline
  note
 
 
-Review: bob · APPROVED (1) · 3 Jan 09:00
-  ↳ diff example.txt:3 · 3 Jan 09:05
+bob [LGTM] (1)
+  Latest activity  3 Jan 09:05
+  [COMMENT] ↳ example.txt:3
+  Posted  3 Jan 09:05
 
  LGTM
  inline

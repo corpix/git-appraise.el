@@ -13,11 +13,11 @@ Description
 
 Viewed review
 
-Your Review Feedback
-Leave a comment here.
+Feedback
+No draft yet.
 
-Conversation (0)
-No conversation found.
+Discussion (0)
+No comments yet.
 Files changed (3 files; 3 additions, 3 deletions)
   3/4 viewed
 modified        +2 -2       ✓       big.txt

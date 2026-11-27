@@ -31,6 +31,7 @@
 ;;; Code:
 
 (require 'git-appraise-section-shared)
+(require 'git-appraise-badges)
 (require 'git-appraise-time)
 (require 'magit-section)
 (require 'magit-diff)
@@ -289,11 +290,11 @@ from review infos when available, otherwise from the raw diff text
                             'keymap 'git-appraise-commit-check-detail-section-map))
         (insert "\n")))))
 (defun git-appraise-section--insert-commit-checks (contexts)
-  "Insert the CI Checks section for the commit rollup CONTEXTS."
+  "Insert the Checks section for the commit rollup CONTEXTS."
   (git-appraise-section--hide-if-hidden
    (magit-insert-section (git-appraise-commit-checks-section nil t)
      (insert (propertize
-              (format "  CI Checks (%s)" (length contexts))
+              (format "  Checks (%s)" (length contexts))
               'font-lock-face 'git-appraise-checker-name-face))
      (magit-insert-heading)
      (dolist (check contexts)
@@ -301,7 +302,7 @@ from review infos when available, otherwise from the raw diff text
 (defun git-appraise-section--insert-commit-with-checks (obj state contexts)
   "Insert the commit OBJ heading with its CI checks subtree.
 STATE is the rollup state, CONTEXTS the checks list."
-  (insert (format "%s%s%s %s "
+  (insert (format "%s%s%s %s"
                   (propertize (format "%-6s " (oref obj sha))
                               'font-lock-face 'magit-hash)
                   (if-let ((date (oref obj date)))
@@ -313,8 +314,6 @@ STATE is the rollup state, CONTEXTS the checks list."
                   (if (string-equal state "SUCCESS")
                       ":white_check_mark:"
                     ":x:")))
-  (insert (propertize "Expand for Details:"
-                      'font-lock-face 'git-appraise-checker-detail-face))
   (magit-insert-heading)
   (when (> (length (split-string (oref obj msg) "\n")) 1)
     (insert (oref obj msg))
@@ -354,7 +353,8 @@ collapsed and carries the CI checks subtree."
       (git-appraise-section--hide-if-hidden
        (magit-insert-section (git-appraise-commits-header-section
                              nil git-appraise-fold-header-sections)
-        (insert (propertize "Commits:" 'font-lock-face 'magit-section-heading))
+        (insert (propertize (format "Commits (%d)" (length .commits.nodes))
+                            'font-lock-face 'magit-section-heading))
         (magit-insert-heading)
         (dolist (c .commits.nodes)
           (let-alist c
@@ -431,14 +431,41 @@ Local diff reviews are read-only: no feedback section."
       (git-appraise-section--hide-if-hidden
        (magit-insert-section (git-appraise-feedback-section obj
                                                             git-appraise-fold-header-sections)
-         (insert (propertize "Your Review Feedback" 'font-lock-face 'magit-section-heading))
+         (insert (propertize "Feedback" 'font-lock-face 'magit-section-heading))
+         (when (and (stringp feedback) (not (string-empty-p feedback)))
+           (insert " " (git-appraise-badge "DRAFT")))
          (magit-insert-heading)
         (magit-insert-section (git-appraise-feedback-section obj)
           (if feedback
               (insert feedback)
-            (insert (propertize "Leave a comment here." 'font-lock-face 'magit-dimmed))))
+            (insert (propertize "No draft yet." 'font-lock-face 'magit-dimmed))))
         (insert ?\n)
         (insert ?\n))))))
+
+(defun git-appraise-section--set-feedback-badge-in-place (section feedback)
+  "Update SECTION's heading badge after FEEDBACK changes in place."
+  (let ((parent (and section (oref section parent)))
+        (inhibit-read-only t))
+    (when parent
+      (save-excursion
+        (goto-char (oref parent start))
+        (when (re-search-forward "^Feedback" (oref parent content) t)
+          (let ((after-label (point)))
+            (when (search-forward "[DRAFT]" (line-end-position) t)
+              (delete-region (max after-label
+                                  (- (point) (length " [DRAFT]")))
+                             (point)))
+            (when (and (stringp feedback) (not (string-empty-p feedback)))
+              (goto-char after-label)
+              (let ((begin (point))
+                    (section-prop (get-text-property
+                                   (max (point-min) (1- after-label))
+                                   'magit-section)))
+                (insert " " (git-appraise-badge "DRAFT"))
+                (when section-prop
+                  (put-text-property begin (point) 'magit-section
+                                     section-prop))))
+            t))))))
 ;; `defvar' does not replace maps in a running Emacs after `load'.
 (--each '(git-appraise-author-section-map
           git-appraise-title-section-map

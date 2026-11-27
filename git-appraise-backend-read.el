@@ -460,6 +460,9 @@ Return a pair of normalized infos and inline comments."
                          (a-get comment 'description)))
                   (timestamp (git-appraise-backend--timestamp
                               (a-get comment 'timestamp)))
+                  (original-time
+                   (git-appraise-backend--timestamp
+                    (a-get-in thread '(original timestamp))))
                   (state (cond ((eq (a-get comment 'resolved) :false)
                                 (if (eq thread-resolved :false)
                                     "CHANGES_REQUESTED" "ADDRESSED"))
@@ -480,7 +483,7 @@ Return a pair of normalized infos and inline comments."
                                          (parentHash . ,parent-hash)
                                          (threadId . ,root-hash)
                                          (isResolved . ,(eq thread-resolved t))
-                                         (createdAt . ,timestamp)
+                                         (createdAt . ,(or original-time timestamp))
                                          (updatedAt . ,timestamp)))))
                      inline))
               ((and (stringp path) (numberp line) (> line 0))
@@ -493,7 +496,8 @@ Return a pair of normalized infos and inline comments."
                        (parentHash . ,parent-hash)
                        (threadId . ,root-hash)
                        (isResolved . ,(eq thread-resolved t))
-                       (createdAt . ,timestamp))
+                       (createdAt . ,(or original-time timestamp))
+                       (updatedAt . ,timestamp))
                      historical))
               (t
                (let ((where (if path
@@ -509,7 +513,8 @@ Return a pair of normalized infos and inline comments."
                          (parentHash . ,parent-hash)
                          (threadId . ,root-hash)
                          (isResolved . ,(eq thread-resolved t))
-                         (createdAt . ,timestamp))
+                         (createdAt . ,(or original-time timestamp))
+                         (updatedAt . ,timestamp))
                        conversation))))
              (dolist (child (a-get thread 'children))
                (visit child location root-hash hash)))))

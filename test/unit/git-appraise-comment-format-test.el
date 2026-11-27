@@ -25,22 +25,33 @@
                    (git-appraise-comment-format-time
                     (encode-time 0 20 4 25 7 2025) now)))))
 
-;;; req-2026-11-24-010: comment types use a consistent heading
+;;; req-2026-11-24-010: compact comment headings and activity detail
 ;; covers: git-appraise-comment-format.el git-appraise-section-comment.el
-;; covers-fn: git-appraise-comment-format-heading
+;; covers-fn: git-appraise-comment-format-heading, git-appraise-comment-format-time-detail
 ;; enforcement: test
 (ert-deftest git-appraise-comment-format/req-2026-11-24-010-unified-headings ()
-  "WHEN a reviewer reads comments and replies THE SYSTEM SHALL present authors, status, and time in a consistent order."
+  "WHEN a reviewer reads comments and replies THE SYSTEM SHALL show compact status headings and reveal highlighted time inside each opened item."
   (let* ((now (encode-time 0 30 12 24 11 2026))
          (timestamp (encode-time 0 20 4 24 11 2026)))
     (cl-letf (((symbol-function 'current-time) (lambda () now)))
-      (should (equal "Comment by alice · RESOLVED · 04:20"
+      (should (equal "[COMMENT] alice [RESOLVED]"
                      (substring-no-properties
                       (git-appraise-comment-format-heading
                        "Comment" "alice" timestamp '("RESOLVED")))))
-      (should (equal "Reply by YOU · DRAFT · 04:20"
+      (should (equal "[REPLY] YOU [DRAFT]"
                      (substring-no-properties
                       (git-appraise-comment-format-heading
-                       "Reply" "YOU" timestamp '("DRAFT"))))))))
+                       "Reply" "YOU" timestamp '("DRAFT")))))
+      (should (equal "[REPLY] alice [RESOLVED]"
+                     (substring-no-properties
+                      (git-appraise-comment-format-heading
+                       "Reply" "alice" timestamp '("APPROVED")))))
+      (let ((detail (git-appraise-comment-format-time-detail
+                     "Posted" timestamp)))
+        (should (equal "  Posted  04:20\n"
+                       (substring-no-properties detail)))
+        (should (eq 'git-appraise-timestamp-face
+                    (get-text-property (string-match "04:20" detail)
+                                       'font-lock-face detail)))))))
 
 ;;; git-appraise-comment-format-test.el ends here

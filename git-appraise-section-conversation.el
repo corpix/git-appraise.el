@@ -12,6 +12,7 @@
 (require 'a)
 (require 'git-appraise-faces)
 (require 'git-appraise-comment-format)
+(require 'git-appraise-badges)
 (require 'git-appraise-db)
 (require 'git-appraise-utils)
 (require 'git-appraise-fold-state)
@@ -24,7 +25,7 @@
 (defclass git-appraise-comment-header-section (magit-section)
   ((keymap :initform 'git-appraise-comment-header-section-map)))
 (defvar git-appraise-comment-header-section-map (make-sparse-keymap)
-  "Keymap for the Conversation heading.")
+  "Keymap for the Discussion heading.")
 (defclass git-appraise-comment-section (magit-section)
   ((keymap :initform 'git-appraise-comment-section-map)
    (author :initarg :author
@@ -73,6 +74,17 @@ Used when editing a submitted comment.")
         (condition-case nil (time-to-seconds (date-to-time ts)) (error 0))
       0)))
 
+(defun git-appraise-comment--latest-time (times)
+  "Return the latest valid ISO timestamp in TIMES, or nil."
+  (--reduce-from
+   (if (or (null acc)
+           (> (git-appraise-comment--created-at-seconds
+               `((createdAt . ,it)))
+              (git-appraise-comment--created-at-seconds
+               `((createdAt . ,acc)))))
+       it acc)
+   nil (--filter it times)))
+
 (defun git-appraise-comment--goto-diff-comment (id internal-id)
   "Jump to diff comment identified by ID/INTERNAL-ID."
   (let (target)
@@ -107,22 +119,21 @@ Omit author when it matches GROUP-AUTHOR."
          (path (a-get comment 'path))
          (line (or (a-get comment 'line) (a-get comment 'originalLine)
                    (a-get comment 'position)))
-         (created (a-get comment 'createdAt))
          (id (a-get comment 'databaseId))
          (internal-id (a-get comment 'internal-id))
          (who (unless (and group-author (string= author group-author))
                 author))
-         (label (format "↳ diff%s%s%s · %s%s"
-                        (if who (format " %s on" who) "")
-                        (if path (format " %s" path) " comment")
-                        (if line (format ":%s" line) "")
-                        (or (git-appraise-comment-format-time created) "")
-                        (if-let* ((state (a-get comment 'state)))
-                            (if (equal state "COMMENTED") ""
-                              (format " · %s" state))
-                          ""))))
+         (label (format "↳ %s%s%s"
+                        (if who (concat who " · ") "")
+                        (or path "comment")
+                        (if line (format ":%s" line) "")))
+         (status (a-get comment 'state))
+         (badge (if (and (a-get comment 'parentHash)
+                         (equal status "APPROVED"))
+                    "RESOLVED"
+                  (if (equal status "COMMENTED") "COMMENT" status))))
     (magit-insert-section (git-appraise-conversation-link id)
-      (insert "  ")
+      (insert "  " (git-appraise-badge badge) " ")
       (insert-text-button
        label
        'action (lambda (_) (git-appraise-comment--goto-diff-comment id internal-id))
@@ -130,6 +141,8 @@ Omit author when it matches GROUP-AUTHOR."
        'face 'git-appraise-dimmed-face
        'follow-link t)
       (magit-insert-heading)
+      (insert (git-appraise-comment-format-time-details
+               (a-get comment 'createdAt) (a-get comment 'updatedAt)))
       (insert ?\n)
       (let ((obj (git-appraise-comment-section
                   :author author :msg (git-appraise-comment--node-body comment)
@@ -156,35 +169,33 @@ Omit author when it matches GROUP-AUTHOR."
 
 (defun git-appraise-comment--review-group-label (review)
   "Return a label for REVIEW group."
-  (let ((author (or (a-get-in review (list 'author 'login)) "unknown"))
-        (state (or (a-get review 'state) "REVIEW")))
-    (format "Review: %s · %s" author (git-appraise--propertize-keyword state))))
+  (or (a-get-in review (list 'author 'login)) "unknown"))
 
 (defun git-appraise-comment--review-group-time (review)
   "Return representative time for REVIEW group."
-  (or (a-get review 'submittedAt)
-      (a-get review 'createdAt)
-      (let ((nodes (a-get-in review '(comments nodes))))
-        (when nodes
-          (a-get (car (last (--sort (< (git-appraise-comment--created-at-seconds it)
-                                       (git-appraise-comment--created-at-seconds other))
-                                    nodes)))
-                 'createdAt)))))
+  (git-appraise-comment--latest-time
+   (append (list (a-get review 'submittedAt)
+                 (a-get review 'createdAt)
+                 (a-get review 'updatedAt))
+           (--map (or (a-get it 'updatedAt)
+                      (a-get it 'createdAt))
+                  (a-get-in review '(comments nodes))))))
 
-(defun git-appraise-comment--insert-conversation-group (key label time-str comments &optional group-author)
-  "Insert a foldable conversation group LABEL/TIME-STR with COMMENTS.
+(defun git-appraise-comment--insert-conversation-group (key label time comments
+                                                         &optional group-author status)
+  "Insert a foldable conversation group LABEL/TIME with COMMENTS.
 GROUP-AUTHOR suppresses redundant author in inline diff links."
   (let ((folded (git-appraise-fold-state--choice "conversation" key key)))
     (git-appraise-section--hide-if-hidden
      (magit-insert-section (git-appraise-conversation-group key
                            (if (eq folded 'unset) t folded))
-    (insert (propertize
-             (format "%s (%d)%s"
-                     label
-                     (length comments)
-                     (if time-str (concat " · " time-str) ""))
-             'font-lock-face 'magit-section-secondary-heading))
+    (insert (propertize label 'font-lock-face 'magit-section-secondary-heading))
+    (when status
+      (insert " " (git-appraise-badge status)))
+    (insert (format " (%d)" (length comments)))
     (magit-insert-heading)
+    (insert (or (git-appraise-comment-format-time-detail
+                 "Latest activity" time) ""))
     (dolist (c comments)
       (cond
        ((plist-get c :link)
@@ -198,12 +209,12 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
                      :id (a-get node 'databaseId)
                      :edited? (a-get node 'edited)
                      :edit-history (a-get node 'editHistory)))
-               (time (git-appraise-comment-format-time (a-get node 'createdAt))))
+               (time (a-get node 'createdAt)))
           (magit-insert-section (git-appraise-comment-section obj)
-            (insert (propertize "Summary" 'face 'magit-section-heading))
-            (when time
-              (insert " · " (propertize time 'face 'git-appraise-timestamp-face)))
+            (insert (propertize "Note" 'face 'magit-section-heading))
             (magit-insert-heading)
+            (insert (git-appraise-comment-format-time-details
+                     time (a-get node 'updatedAt)))
             (insert ?\n)
             (git-appraise-insert-comment-lines obj)
             (git-appraise-section--insert-edit-history obj)
@@ -224,6 +235,8 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
                                (list (a-get node 'state)))
                              (when (a-get node 'edited) '("EDITED")))))
             (magit-insert-heading)
+            (insert (git-appraise-comment-format-time-details
+                     (a-get node 'createdAt) (a-get node 'updatedAt)))
             (insert ?\n)
             (git-appraise-insert-comment-lines obj)
             (git-appraise-section--insert-edit-history obj)
@@ -260,9 +273,13 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
         (when all-items
           (let ((sorted-items (--sort (< (plist-get it :time) (plist-get other :time))
                                       all-items)))
-            (push (list :key "general" :label "General comments"
-                        :time (a-get (plist-get (car (last sorted-items)) :node)
-                                     'createdAt)
+            (push (list :key "general" :label "General"
+                        :time (git-appraise-comment--latest-time
+                               (--map (or (a-get (plist-get it :node)
+                                                 'updatedAt)
+                                          (a-get (plist-get it :node)
+                                                 'createdAt))
+                                      sorted-items))
                         :items sorted-items)
                   groups))))
       ;; Review groups
@@ -295,35 +312,39 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
                                                  (a-get (car nodes) 'internal-id)
                                                  "unknown"))
                         :label (git-appraise-comment--review-group-label review)
+                        :status (a-get review 'state)
                         :author author
                         :time (git-appraise-comment--review-group-time review)
                         :items (nreverse items))
                   groups)))))
-    ;; Sort groups and items by date
-    (let ((sorted (--sort (< (git-appraise-comment--created-at-seconds
-                              `((createdAt . ,(or (plist-get it :time) ""))))
-                             (git-appraise-comment--created-at-seconds
-                              `((createdAt . ,(or (plist-get other :time) "")))))
-                          groups)))
-      (--map (plist-put (copy-sequence it) :items
-                        (--sort (< (plist-get it :time) (plist-get other :time))
-                                (plist-get it :items)))
-             sorted))))
+    (git-appraise-comment--sort-groups groups)))
 
-(cl-defmethod git-appraise--insert-conversation-section ((appraise git-appraise-backend-repo))
-  "Insert conversation section for APPRAISE reviews."
-  (let ((groups (git-appraise-comment--collect-conversation-groups appraise)))
-    (if (not groups)
-        (progn
-          (git-appraise-section--insert-dimmed "No conversation found.")
-          (insert ?\n))
-      (dolist (g groups)
-        (git-appraise-comment--insert-conversation-group
-         (plist-get g :key)
-         (plist-get g :label)
-         (git-appraise-comment-format-time (plist-get g :time))
-         (plist-get g :items)
-         (plist-get g :author))))))
+(defun git-appraise-comment--sort-groups (groups)
+  "Sort GROUPS and their items by activity time."
+  (let ((sorted (--sort (< (git-appraise-comment--created-at-seconds
+                            `((createdAt . ,(or (plist-get it :time) ""))))
+                           (git-appraise-comment--created-at-seconds
+                            `((createdAt . ,(or (plist-get other :time) "")))))
+                        groups)))
+    (--map (plist-put (copy-sequence it) :items
+                      (--sort (< (plist-get it :time) (plist-get other :time))
+                              (plist-get it :items)))
+           sorted)))
+
+(defun git-appraise-comment--insert-groups (groups)
+  "Insert already collected discussion GROUPS."
+  (if (not groups)
+      (progn
+        (git-appraise-section--insert-dimmed "No comments yet.")
+        (insert ?\n))
+    (dolist (g groups)
+      (git-appraise-comment--insert-conversation-group
+       (plist-get g :key)
+       (plist-get g :label)
+       (plist-get g :time)
+       (plist-get g :items)
+       (plist-get g :author)
+       (plist-get g :status)))))
 
 (defun git-appraise-section-insert-top-level-comments ()
   "Insert general comments for the PULL-REQUEST in the buffer."
@@ -331,27 +352,20 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
                      (git-appraise-db-get-pullreq)))
     (let* ((groups (git-appraise-comment--collect-conversation-groups pr))
            (total (--reduce-from (+ acc (length (plist-get it :items))) 0 groups))
-           (last-time (--reduce-from
-                       (let ((tstr (plist-get it :time)))
-                         (if (and tstr
-                                  (or (null acc)
-                                      (> (git-appraise-comment--created-at-seconds
-                                          `((createdAt . ,tstr)))
-                                         (git-appraise-comment--created-at-seconds
-                                          `((createdAt . ,acc))))))
-                             tstr acc))
-                       nil groups))
-           (last-time-str (and last-time (git-appraise-comment-format-time last-time))))
+           (last-time (git-appraise-comment--latest-time
+                       (--map (plist-get it :time) groups))))
       (git-appraise-section--hide-if-hidden
        (magit-insert-section (git-appraise-comment-header-section
                              nil git-appraise-fold-header-sections)
          (insert (propertize
-                  (format "Conversation (%d)%s" total
-                          (if last-time-str (concat " · last " last-time-str) ""))
+                  (format "Discussion (%d)" total)
                   'font-lock-face 'magit-section-heading))
          (magit-insert-heading)
          (when git-appraise-section--display-top-level-comments
-           (git-appraise--insert-conversation-section pr)))))))
+           (when last-time
+             (insert (or (git-appraise-comment-format-time-detail
+                          "Latest activity" last-time) "")))
+           (git-appraise-comment--insert-groups groups)))))))
 
 ;; -
 

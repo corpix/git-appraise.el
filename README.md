@@ -39,8 +39,8 @@ full local workflow.
 
 ## Reviewing
 
-The review buffer shows the request, commits, conversation, and file diffs.
-Conversation contains the full text of every review comment and reply, with
+The review buffer shows the request, commits, discussion, and file diffs.
+Discussion contains the full text of every review comment and reply, with
 links back to inline locations. Its groups can be folded, and their fold
 choices persist. Existing inline comments also appear next to their diff lines.
 File headings show change counts and tags such as `[DOC]` or `[GEN]`. Documentation,
@@ -48,9 +48,11 @@ lockfiles, and generated output are classified and folded by default. Files
 marked `linguist-generated` or `linguist-vendored` in `.gitattributes` are
 excluded from the rendered diff by default; the Files changed heading reports
 the hidden count. Use `r x` to toggle that exclusion for the current buffer.
-Comment and reply headings show the author, status, and local time. They show
-only the time for today, add the day and month for older comments this year,
-and add the year for comments from another year.
+Comment and reply headings use short status badges. Graphical Emacs shows SVG
+badges; terminal Emacs shows the same labels in text. An `LGTM` badge means a
+git-appraise approval, not file-level approval. Timestamps are highlighted
+inside opened discussion sections: today shows the time, older comments add
+the date as needed. Commit headings keep their Magit-style dates.
 
 Press `r` for the command menu. The main actions are:
 
@@ -60,8 +62,8 @@ Press `r` for the command menu. The main actions are:
 | Diff hunk | `C-c RET` | Send one inline comment immediately |
 | File heading | `RET` | Send a file comment |
 | Inline comment | `RET` | Reply |
-| Conversation comment | `C-c C-a` | Reply |
-| Conversation heading | `RET` | Reveal the conversation |
+| Discussion comment | `C-c C-a` | Reply |
+| Discussion heading | `RET` | Reveal the discussion |
 | Draft comment | `RET` | Edit the draft |
 | Draft comment | `C-c C-k` | Delete the draft |
 | Draft comment | `C-c C-f` | Mark or unmark the draft as FYI |

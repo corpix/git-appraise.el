@@ -113,7 +113,7 @@ Sets up the magit section insertion context and absorbs the boundary."
                      path))))))
 
 (defun git-appraise-comment--refresh-conversation-in-place (buff-name)
-  "Rebuild only the Conversation section in BUFF-NAME.
+  "Rebuild only the Discussion section in BUFF-NAME.
 Return non-nil if it was replaced.  The diff tree and lazy queue stay
 untouched; preserve the heading's current fold state."
   (let* ((buf (get-buffer buff-name))
@@ -151,7 +151,7 @@ untouched; preserve the heading's current fold state."
                          (git-appraise-section-insert-top-level-comments)))
                       (setq new (car (last (oref parent children))))
                       (unless (and new (not (eq new old)))
-                        (error "Conversation section was not inserted"))
+                        (error "Discussion section was not inserted"))
                       (if hidden
                           (magit-section-hide new)
                         (magit-section-show new))

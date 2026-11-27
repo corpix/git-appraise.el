@@ -100,7 +100,7 @@
                        "Revised finding"))
         (should (= 1 (length (a-get thread 'edits)))))
       (with-current-buffer buffer
-        (should (string-match-p "Edit history (2)" (buffer-string)))
+        (should (string-match-p "Edits (2)" (buffer-string)))
         (let (history)
           (magit-map-sections
            (lambda (section)

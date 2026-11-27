@@ -114,8 +114,8 @@ classification carries :changed; a soft signal that never affects
 the rollup or the counter.")
 (defcustom git-appraise-fold-header-sections t
   "When non-nil, low-signal top sections start folded.
-\"Commits\" (with their CI checks), \"Description\", \"Your
-Review Feedback\" and \"Conversation\" are collapsed to their
+\"Commits\" (with their CI checks), \"Description\", \"Feedback\"
+and \"Discussion\" are collapsed to their
 headings, so the diff is the first thing you see when the buffer
 opens.  Press TAB on any of them to expand."
   :type 'boolean

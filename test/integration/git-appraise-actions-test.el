@@ -179,8 +179,13 @@
     (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
     (with-current-buffer (git-appraise-pr-buffer-name)
       (goto-char (point-min))
-      (search-forward "Your Review Feedback")
-      (execute-kbd-macro (kbd "C-c C-k")))
+      (search-forward "Feedback")
+      (should (string-match-p "Feedback \\[DRAFT\\]"
+                              (buffer-string)))
+      (execute-kbd-macro (kbd "C-c C-k"))
+      (should-not (string-match-p "Feedback \\[DRAFT\\]"
+                                  (buffer-string)))
+      (should (string-match-p "No draft yet." (buffer-string))))
     (should-not (oref (git-appraise-db-get-pullreq) feedback))))
 
 ;;; req-2026-11-23-009: needs-work action publishes actionable feedback
@@ -429,7 +434,7 @@
           (should (get-buffer git-appraise-comment-buffer-name))
           (should git-appraise-comment-feedback?)
           (with-current-buffer git-appraise-comment-buffer-name
-            (should (string-match-p "Leave a comment here"
+            (should (string-match-p "Write feedback here."
                                     (substring-no-properties (buffer-string))))))
       (when (get-buffer git-appraise-comment-buffer-name)
         (kill-buffer git-appraise-comment-buffer-name))

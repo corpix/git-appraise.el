@@ -27,15 +27,28 @@
 ;;; Code:
 
 (defface git-appraise-timestamp-face
-  `((((class color) (background light))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "DimGrey"
-     :slant italic)
-    (((class color) (background  dark))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "DimGrey"
-     :slant italic))
-  "Face for timestamps."
+  '((t :inherit magit-log-date :weight bold))
+  "Face for activity timestamps shown inside opened sections."
+  :group 'git-appraise)
+
+(defface git-appraise-badge-neutral-face
+  '((t :inherit magit-section-secondary-heading :weight bold))
+  "Face for neutral review and comment badges."
+  :group 'git-appraise)
+
+(defface git-appraise-badge-success-face
+  '((t :inherit success :weight bold))
+  "Face for LGTM and resolved badges."
+  :group 'git-appraise)
+
+(defface git-appraise-badge-warning-face
+  '((t :inherit warning :weight bold))
+  "Face for needs-work and draft badges."
+  :group 'git-appraise)
+
+(defface git-appraise-badge-muted-face
+  '((t :inherit shadow :weight bold))
+  "Face for historical and edited badges."
   :group 'git-appraise)
 
 (defface git-appraise-diff-tag-face

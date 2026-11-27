@@ -43,7 +43,7 @@
   :group 'git-appraise
   :type 'string)
 
-(defcustom git-appraise-comment-feedback-msg ";;; Leave a comment here."
+(defcustom git-appraise-comment-feedback-msg ";;; Write feedback here."
   "Default text to feedback slot."
   :group 'git-appraise
   :type 'string)

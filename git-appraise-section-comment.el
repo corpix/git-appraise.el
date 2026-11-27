@@ -300,6 +300,9 @@ The trailing blank line comes from `render-extra-newline?'."
     (magit-insert-section ((eval type) obj)
       (let* ((start (point))
              (msg (oref obj msg)))
+        (when (slot-boundp obj 'createdAt)
+          (insert (or (git-appraise-comment-format-time-detail
+                       "Drafted" (oref obj createdAt)) "")))
         (dolist (l (git-appraise-utils--split-comment
                     (git-appraise-utils--wrap-text
                      msg
@@ -336,6 +339,11 @@ and 100."
            (overlay-put ,ov 'priority ,(or heading-ov-priority 1))))
        (magit-insert-section (,section-type ,obj)
          (let ((,start (point)))
+           (insert (git-appraise-comment-format-time-details
+                    (and (slot-boundp ,obj 'createdAt)
+                         (oref ,obj createdAt))
+                    (and (slot-boundp ,obj 'updatedAt)
+                         (oref ,obj updatedAt))))
            (git-appraise--insert-html
             (oref ,obj msg)
             (* 3 git-appraise-section-indent-width))
@@ -351,7 +359,7 @@ and 100."
   (when-let* ((versions (oref obj edit-history)))
     (git-appraise-section--hide-if-hidden
      (magit-insert-section (git-appraise-edit-history (oref obj id) t)
-       (magit-insert-heading (format "Edit history (%d)" (length versions)))
+       (magit-insert-heading (format "Edits (%d)" (length versions)))
        (dolist (version versions)
          (insert (format "  %s · %s\n"
                          (or (a-get version 'author) "unknown")
@@ -375,8 +383,7 @@ and 100."
                               '("RESOLVED"))))))
       (git-appraise-section--insert-comment-heading-and-body
        obj 'git-appraise-code-comment-section bgface heading
-       'git-appraise-recent-comment-heading 1 100)
-      (git-appraise-section--insert-edit-history obj))))
+       'git-appraise-recent-comment-heading 1 100))))
 (defun git-appraise-section--comment-bg-face (c)
   "Background face for comment C: self, PR author, or other."
   (let* ((infos (git-appraise-db--pullreq-raw-infos))
@@ -405,8 +412,19 @@ sections with their background overlays."
                             '("RESOLVED"))))))
     (git-appraise-section--insert-comment-heading-and-body
      c 'git-appraise-outdated-comment-section bgface heading
-     nil 100 100)
-    (git-appraise-section--insert-edit-history c)))
+     nil 100 100)))
+
+(defun git-appraise-section--comment-time-line-count (comment)
+  "Return metadata lines inserted for COMMENT's timestamps."
+  (let* ((created (and (slot-boundp comment 'createdAt)
+                       (oref comment createdAt)))
+         (updated (and (slot-boundp comment 'updatedAt)
+                       (oref comment updatedAt)))
+         (details (if (or (git-appraise-local-comment-section-p comment)
+                          (git-appraise-reply-comment-section-p comment))
+                      (git-appraise-comment-format-time-detail "Drafted" created)
+                    (git-appraise-comment-format-time-details created updated))))
+    (cl-count ?\n (or details ""))))
 (defun git-appraise-section--insert-outdated-hunk (hunk metadata hunk-comments
                                                   amount-loc-cell)
   "Insert one outdated HUNK (METADATA its section value) and its
@@ -431,7 +449,9 @@ from inside `magit-insert-section' bodies)."
            (let* ((written-loc (git-appraise--html-written-loc
                                 (oref c msg)
                                 (* 3 git-appraise-section-indent-width)))
-                  (amount-new-loc-outdated-partial (+ 1 written-loc))
+                  (amount-new-loc-outdated-partial
+                   (+ 1 written-loc
+                      (git-appraise-section--comment-time-line-count c)))
                   (amount-new-loc-outdated (if (oref c reactions)
                                                (+ 2 amount-new-loc-outdated-partial)
                                              amount-new-loc-outdated-partial)))
@@ -538,7 +558,9 @@ A quite good assumption: every comment in an outdated hunk will be outdated."
                     (git-appraise--html-written-loc
                      (oref c msg)
                      (* 3 git-appraise-section-indent-width))))
-                 (amount-loc-incr-partial (+ 1 written-loc))
+                 (amount-loc-incr-partial
+                  (+ 1 written-loc
+                     (git-appraise-section--comment-time-line-count c)))
                  (amount-loc-incr (if (oref c reactions)
                                       (+ 2 amount-loc-incr-partial)
                                     amount-loc-incr-partial)))

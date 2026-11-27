@@ -9,7 +9,7 @@
   "The conversation nodes currently stored for the review."
   (a-get-in (git-appraise-db--pullreq-raw-infos) '(comments nodes)))
 (ert-deftest git-appraise-comment-render/req-2026-11-24-103-file-comment-no-refresh ()
-  "WHEN a file comment is sent from an ordinary or renamed file heading THE SYSTEM SHALL store it once and show it in Conversation without a full refresh or diff reload."
+  "WHEN a file comment is sent from an ordinary or renamed file heading THE SYSTEM SHALL store it once and show it in Discussion without a full refresh or diff reload."
   (git-appraise-test--with-review-repo "git-appraise-comment-inplace-test-"
     (git-appraise-test--open-and-render revision)
     (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
@@ -83,7 +83,7 @@
 ;; covers-fn: git-appraise-backend-refresh-comments
 ;; enforcement: test
 (ert-deftest git-appraise-comment-render/req-2026-11-24-104-folded-conversation ()
-  "WHEN a file comment is sent while Conversation is folded THE SYSTEM SHALL conceal it until the section is opened, and a reload shall keep one copy with the same identity."
+  "WHEN a file comment is sent while Discussion is folded THE SYSTEM SHALL conceal it until the section is opened, and a reload shall keep one copy with the same identity."
   (git-appraise-test--with-review-repo "git-appraise-comment-inplace-test-"
     (git-appraise-test--open-and-render revision)
     (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
@@ -148,7 +148,7 @@
 ;; covers-fn: git-appraise-section-insert-top-level-comments, git-appraise-comment-open-at-point
 ;; enforcement: test
 (ert-deftest git-appraise-comment-render/req-2026-11-24-108-conversation-summary-and-open ()
-  "WHEN a reviewer sees a folded conversation THE SYSTEM SHALL show its message count and latest date and open the message with its context."
+  "WHEN a reviewer opens discussion THE SYSTEM SHALL reveal its latest activity time and comments while the folded heading stays concise."
   (git-appraise-test--with-review-repo "git-appraise-comment-inplace-test-"
     (git-appraise-test--run
      directory "git-appraise" "comment" "-m" "First file note" "-f" "example.txt" revision)
@@ -181,9 +181,16 @@
                                  (a-get (car (last nodes)) 'createdAt))))
             (should (= 2 (length nodes)))
             (should (equal
-                     (format "Conversation (2) · last %s" expected-time)
+                     "Discussion (2)"
                      (buffer-substring-no-properties
-                      (line-beginning-position) (line-end-position)))))
+                      (line-beginning-position) (line-end-position))))
+            (save-excursion
+              (goto-char (oref header content))
+              (should (search-forward expected-time (oref header end) t))
+              (should (invisible-p (- (point) (length expected-time))))
+              (should (eq 'git-appraise-timestamp-face
+                          (get-text-property (- (point) (length expected-time))
+                                             'font-lock-face)))))
           (magit-section-hide header)
           (git-appraise-comment-open-at-point)
           (should-not (invisible-p (point)))
@@ -484,7 +491,7 @@
                            (insert-file-contents fixture)
                            (buffer-string)))
                (start (progn (goto-char (point-min))
-                             (search-forward "Conversation")
+                             (search-forward "Discussion")
                              (line-beginning-position)))
                (end (progn (goto-char start)
                            (if (search-forward "Files changed" nil t)
@@ -565,7 +572,7 @@
       (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
       (with-current-buffer (git-appraise-pr-buffer-name)
         (goto-char (point-min))
-        (search-forward "↳ diff")
+        (search-forward "↳ example.txt")
         (push-button)
         (let ((sec (magit-current-section)))
           (should sec)
@@ -608,7 +615,7 @@
           (magit-insert-section (dummy '(rename "old.txt" "new.txt"))
             (insert " ")))
         (goto-char (point-min))
-        (search-forward "↳ diff")
+        (search-forward "↳ example.txt")
         (push-button)
         (let ((sec (magit-current-section)))
           (should sec)
