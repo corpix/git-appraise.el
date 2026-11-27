@@ -10,16 +10,14 @@
 (setq-default git-appraise-analysis-deferred? nil)
 
 (defmacro git-appraise-test--with-store (&rest body)
-  "Run BODY against a fresh temporary store database file."
+  "Run BODY against a fresh in-memory store database."
   (declare (indent 0))
-  `(let ((git-appraise-store-file
-          (make-temp-file "git-appraise-test-store-" nil ".sqlite")))
+  `(let ((git-appraise-store-file nil))
      (unwind-protect
          (progn
            (git-appraise-store-close)
            ,@body)
-       (git-appraise-store-close)
-       (ignore-errors (delete-file git-appraise-store-file)))))
+       (git-appraise-store-close))))
 
 (defun git-appraise-test--reset-db (&optional _file)
   "Reset the review stores.

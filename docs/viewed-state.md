@@ -34,8 +34,7 @@ The UI shows:
 
 Marks survive rebuilds, `G` reloads and Emacs restarts. The diff baseline
 is saved when the whole file becomes viewed, including when the final hunk
-is marked individually. Existing marks from older store versions gain a
-line baseline the next time the file is fully marked viewed.
+is marked individually.
 
 ## Where it lives
 
@@ -45,22 +44,16 @@ database (`git-appraise-store-file`, by default
 the review's original revision (`Review.Revision`). The latest full-file
 baseline is in `viewed_snapshots` under the same repository, revision,
 reviewer and path. Mark events and baselines are committed together.
-Inspect marks with:
-
-```sh
-sqlite3 ~/.emacs.d/git-appraise/state.sqlite \
-  'SELECT * FROM viewed_events WHERE revision = "<review-revision>"'
-```
+The store uses EmacSQL's value encoding. Inspect marks through
+`git-appraise-store-events` from Emacs; raw SQLite text comparisons do
+not match EmacSQL strings.
 
 The store is local to the machine and never travels with
 `git-appraise push` / `git-appraise pull` (those carry only
 `refs/notes/devtools/*`).  Repository identity is the canonical
-common git dir, so linked worktrees share one set of marks.  After
-upgrading from the git-notes backend, run `M-x
-git-appraise-import-git-notes` once per repository: it moves the old
-notes into the store and deletes the `refs/notes/git-appraise-el/*`
-refs, recording each ref's pre-delete tip (in `legacy_imports`) so a
-ref can be restored with `git update-ref` until gc.
+common git dir, so linked worktrees share one set of marks. The EmacSQL
+store requires a fresh database; reset an older database yourself before
+opening reviews with this version.
 
 ## What resets a mark
 

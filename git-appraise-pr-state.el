@@ -2,10 +2,9 @@
 
 ;;; Commentary:
 ;; Durable storage for local, unsent review state (feedback and
-;; draft comments/replies).  Snapshots are appended to the personal
-;; SQLite store (`git-appraise-store.el'), keyed by the repository,
-;; the review revision and the reviewer; the newest snapshot wins
-;; on read.  In-memory objects are caches.
+;; draft comments/replies).  The current draft is kept in the personal
+;; SQLite store (`git-appraise-store.el'), keyed by repository,
+;; review revision and reviewer.  In-memory objects are caches.
 
 ;;; Code:
 

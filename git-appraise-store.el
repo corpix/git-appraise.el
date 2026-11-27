@@ -2,18 +2,13 @@
 
 ;;; Commentary:
 ;; Personal, durable review state -- viewed marks, fold choices and
-;; unsent feedback/drafts -- in one SQLite database under the user's
-;; Emacs directory (2026-11-26 store plan; replaces the git notes
-;; transport).
+;; unsent feedback/drafts -- in one EmacSQL SQLite database.
 ;;
 ;; This file owns the connection and the row mapping and nothing
 ;; else: callers pass repo/revision and receive the same event
 ;; alists the projection reducers have always consumed.  SQL is
-;; built by `git-appraise-sql', the schema lives in
-;; `git-appraise-store-migrations', and the one-shot git-notes
-;; import is `git-appraise-store-import'.  A repository's identity
-;; is its canonical common git dir, so linked worktrees share state
-;; the way git notes did.
+;; built with EmacSQL forms.  A repository's identity is its
+;; canonical common git dir, so linked worktrees share state.
 
 ;;; Code:
 
@@ -21,10 +16,10 @@
 (require 'dash)
 (require 'json)
 (require 'subr-x)
-(require 'sqlite)
+(require 'emacsql)
+(require 'emacsql-sqlite)
 
-(require 'git-appraise-sql)
-(require 'git-appraise-store-migrations)
+(require 'git-appraise-store-schema)
 (require 'git-appraise-time)
 (require 'git-appraise-utils)
 
@@ -35,14 +30,8 @@ Created on first use; the parent directory is created too."
   :group 'git-appraise
   :type 'file)
 
-(defconst git-appraise-store--max-params 900
-  "Bound values per statement.
-Well below SQLite's historical 999-variable limit, so one insert
-statement never depends on the build's SQLITE_MAX_VARIABLE_NUMBER.")
-
-(defconst git-appraise-store--tables
-  '(viewed_events fold_events pr_state legacy_imports viewed_snapshots)
-  "Every table the schema defines.")
+(defconst git-appraise-store--max-batch-values 900
+  "Maximum values in a batched EmacSQL insert statement.")
 
 (defvar git-appraise-store--db nil
   "The open store connection, or nil.")
@@ -58,31 +47,34 @@ statement never depends on the build's SQLITE_MAX_VARIABLE_NUMBER.")
        (sqlite-available-p)))
 
 (defun git-appraise-store-db ()
-  "The open store connection; opened and migrated on first use."
+  "The open store connection; opened and checked on first use."
   (or git-appraise-store--db
       (setq git-appraise-store--db (git-appraise-store--open))))
 
 (defun git-appraise-store--open ()
   (unless (git-appraise-store-available-p)
     (error "git-appraise needs an Emacs built with SQLite support"))
-  (let* ((file (expand-file-name git-appraise-store-file))
-         ;; `sqlite-open' returns nil instead of signalling when the
-         ;; directory cannot be created or the file is not a database.
-         (db (progn
-               (make-directory (or (file-name-directory file) ".") t)
-               (sqlite-open file))))
-    (unless db
-      (error "Could not open the review store: %s" file))
-    (sqlite-execute db "PRAGMA busy_timeout = 5000")
-    (sqlite-execute db "PRAGMA journal_mode = WAL")
-    (sqlite-execute db "PRAGMA foreign_keys = ON")
-    (git-appraise-store-migrate db)
-    db))
+  (let* ((file (and git-appraise-store-file
+                    (expand-file-name git-appraise-store-file)))
+         (db nil)
+         (ready nil))
+    (when file
+      (make-directory (or (file-name-directory file) ".") t))
+    (unwind-protect
+        (progn
+          (setq db (emacsql-sqlite-open file))
+          (git-appraise-store-schema-create db)
+          (when file
+            (emacsql db [:pragma (= journal-mode wal)]))
+          (setq ready t)
+          db)
+      (when (and db (not ready))
+        (emacsql-close db)))))
 
 (defun git-appraise-store-close ()
   "Close the store connection, if one is open."
   (when git-appraise-store--db
-    (ignore-errors (sqlite-close git-appraise-store--db))
+    (ignore-errors (emacsql-close git-appraise-store--db))
     (setq git-appraise-store--db nil)))
 
 (add-hook 'kill-emacs-hook #'git-appraise-store-close)
@@ -96,28 +88,27 @@ Roll back on any non-local exit; return THUNK's result."
         committed)
     (unwind-protect
         (progn
-          (sqlite-execute db "BEGIN IMMEDIATE")
+          (emacsql db [:begin-immediate])
           (let ((result (funcall thunk)))
-            (sqlite-execute db "COMMIT")
+            (emacsql db [:commit])
             (setq committed t)
             result))
       (unless committed
-        (ignore-errors (sqlite-execute db "ROLLBACK"))))))
+        (ignore-errors (emacsql db [:rollback]))))))
 
-(defun git-appraise-store--count (db table repo-key)
-  "The rows of TABLE belonging to REPO-KEY."
+(defun git-appraise-store--contains-repo-p (db table repo-key)
+  "Non-nil when TABLE contains a row for REPO-KEY."
   (unless (memq table git-appraise-store--tables)
     (error "Unknown table: %S" table))
-  (pcase-let ((`(,sql . ,params)
-               (git-appraise-sql-select :from table :count t
-                                        :where (list '= 'repo repo-key))))
-    (caar (sqlite-select db sql params))))
+  (car (emacsql db [:select [1] :from $i1
+                    :where (= repo $s2) :limit 1]
+                table repo-key)))
 
 (defun git-appraise-store-contains-repo-p (repo)
   "Non-nil when the store already holds any state for REPO."
   (if-let* ((repo-key (git-appraise-store-repo-key repo)))
       (let ((db (git-appraise-store-db)))
-        (--any? (> (git-appraise-store--count db it repo-key) 0)
+        (--any? (git-appraise-store--contains-repo-p db it repo-key)
                 git-appraise-store--tables))
     nil))
 
@@ -148,8 +139,8 @@ repository.  Memoized per session."
 (defun git-appraise-store--table (kind)
   "The table holding KIND's events."
   (pcase kind
-    (`viewed 'viewed_events)
-    (`fold 'fold_events)
+    (`viewed 'viewed-events)
+    (`fold 'fold-state)
     (_ (error "Unknown mark kind: %S" kind))))
 
 (defun git-appraise-store--flag (kind)
@@ -158,31 +149,47 @@ repository.  Memoized per session."
 
 (defun git-appraise-store--event-columns (kind)
   "The event columns an insert names, in row order."
-  `(repo revision id actor item path fingerprint range
-         ,(git-appraise-store--flag kind) at_us))
+  (append '(repo revision actor)
+          (when (eq kind 'fold) '(identity))
+          `(id item path fingerprint range
+               ,(git-appraise-store--flag kind) at-us)))
 
 (defun git-appraise-store--event-select-columns (kind)
   "The event columns a read returns, in row order."
   `(id actor item path fingerprint range
-       ,(git-appraise-store--flag kind) at_us))
+       ,(git-appraise-store--flag kind) at-us))
+
+(defun git-appraise-store--fold-identity (event)
+  "Return the stable row identity for fold EVENT."
+  (secure-hash 'sha256
+               (prin1-to-string
+                (list (a-get event 'item) (a-get event 'path)
+                      (a-get event 'fingerprint) (a-get event 'range)))))
 
 (defun git-appraise-store--event-row (kind event repo-key revision)
   "The full insert row for event alist EVENT of KIND."
-  (list repo-key
-        revision
-        (or (a-get event 'id) (error "Event without id"))
-        (or (a-get event 'actor) (error "Event without actor"))
-        (or (a-get event 'item) (error "Event without item"))
-        (or (a-get event 'path) (error "Event without path"))
-        (or (a-get event 'fingerprint) (error "Event without fingerprint"))
-        (a-get event 'range)
-        (let ((flag (a-get event (git-appraise-store--flag kind))))
-          (unless (memq flag '(t nil))
-            (error "Bad %s flag in event %s"
-                   (git-appraise-store--flag kind) (a-get event 'id)))
-          (if (eq flag t) 1 0))
-        (or (git-appraise-time-parse-utc (a-get event 'at))
-            (error "Bad timestamp in event %s" (a-get event 'id)))))
+  (vconcat
+   (--map (if (stringp it) (substring-no-properties it) it)
+          (append
+           (list repo-key revision
+                 (or (a-get event 'actor) (error "Event without actor")))
+           (when (eq kind 'fold)
+             (list (git-appraise-store--fold-identity event)))
+           (list (or (a-get event 'id) (error "Event without id"))
+                 (or (a-get event 'item) (error "Event without item"))
+                 (or (a-get event 'path) (error "Event without path"))
+                 (or (a-get event 'fingerprint)
+                     (error "Event without fingerprint"))
+                 (a-get event 'range)
+                 (let ((flag (a-get event (git-appraise-store--flag kind))))
+                   (unless (memq flag '(t nil))
+                     (error "Bad %s flag in event %s"
+                            (git-appraise-store--flag kind)
+                            (a-get event 'id)))
+                   (if flag 1 0))
+                 (or (git-appraise-time-parse-utc (a-get event 'at))
+                     (error "Bad timestamp in event %s"
+                            (a-get event 'id))))))))
 
 (defun git-appraise-store--row->event (kind row)
   "The event alist for a stored KIND row ROW."
@@ -196,46 +203,62 @@ repository.  Memoized per session."
       (,(git-appraise-store--flag kind) . ,(if (and flag (= flag 1)) t nil))
       (at . ,(git-appraise-time-from-epoch-us at-us)))))
 
-(defun git-appraise-store-events (repo revision kind)
-  "All stored events of KIND for REPOSITORY REVISION, oldest first.
+(defun git-appraise-store-events (repo revision kind &optional actor)
+  "Stored events of KIND for REPOSITORY REVISION, oldest first.
+When ACTOR is non-nil, return only that reviewer's events.
 KIND is `viewed' or `fold'.  The event alists are exactly what the
 projection reducers consume; a repository without state, or a nil
 REPO, has no events."
   (if-let* ((repo-key (git-appraise-store-repo-key repo)))
-      (pcase-let* ((`(,sql . ,params)
-                    (git-appraise-sql-select
-                     :from (git-appraise-store--table kind)
-                     :columns (git-appraise-store--event-select-columns kind)
-                     :where `(:and (= repo ,repo-key) (= revision ,revision))
-                     :order-by '((at_us asc) (id asc))))
-                   (rows (sqlite-select (git-appraise-store-db) sql params)))
+      (let* ((db (git-appraise-store-db))
+             (cols (vconcat (git-appraise-store--event-select-columns kind)))
+             (table (git-appraise-store--table kind))
+             (rows (if actor
+                       (emacsql db
+                                [:select $i1 :from $i2
+                                 :where (and (= repo $s3)
+                                             (= revision $s4)
+                                             (= actor $s5))
+                                 :order-by [(asc at-us) (asc id)]]
+                                cols table repo-key revision actor)
+                     (emacsql db
+                              [:select $i1 :from $i2
+                               :where (and (= repo $s3) (= revision $s4))
+                               :order-by [(asc at-us) (asc id)]]
+                              cols table repo-key revision))))
         (--map (git-appraise-store--row->event kind it) rows))
     nil))
 
 (defun git-appraise-store--insert-chunked (db table columns rows)
   "Insert ROWS into TABLE, several statements' worth if needed.
-Rows are split so no statement binds more than
-`git-appraise-store--max-params' values; the caller owns the
+Rows are split to cap compiled SQL statement size at roughly
+`git-appraise-store--max-batch-values' values; the caller owns the
 transaction, so a split batch still commits whole or not at all."
-  (let ((per (max 1 (/ git-appraise-store--max-params (length columns)))))
+  (let ((per (max 1 (/ git-appraise-store--max-batch-values
+                       (length columns)))))
     (--each (-partition-all per rows)
-      (pcase-let ((`(,sql . ,params)
-                   (git-appraise-sql-insert :into table :columns columns
-                                            :rows it :on-conflict :ignore)))
-        (sqlite-execute db sql params)))))
+      (if (eq table 'viewed-events)
+          (emacsql db
+                   [:insert-or-ignore-into $i1 [$i2] :values $v3]
+                   table (vconcat columns) it)
+        (emacsql db
+                 [:insert-or-replace-into $i1 [$i2] :values $v3]
+                 table (vconcat columns) it)))))
 
 (defun git-appraise-store--insert-viewed-snapshot (db key revision actor path diff)
   "Insert ACTOR's viewed DIFF for PATH using DB and repository KEY."
-  (pcase-let ((`(,sql . ,params)
-               (git-appraise-sql-insert
-                :into 'viewed_snapshots
-                :columns '(repo revision actor path diff at_us)
-                :rows (list (list key revision actor path
-                                  (substring-no-properties diff)
-                                  (git-appraise-time-parse-utc
-                                   (git-appraise-time-now-utc t))))
-                :on-conflict :replace)))
-    (sqlite-execute db sql params)))
+  (unless (stringp diff)
+    (error "Viewed snapshot needs diff text"))
+  (emacsql db
+           [:insert-or-replace-into viewed-snapshots
+            [repo revision actor path diff at-us] :values $v1]
+           (vector key
+                   (substring-no-properties revision)
+                   (substring-no-properties actor)
+                   (substring-no-properties path)
+                   (substring-no-properties diff)
+                   (git-appraise-time-parse-utc
+                    (git-appraise-time-now-utc t)))))
 
 (defun git-appraise-store-append-events (repo revision kind events &optional snapshots)
   "Store EVENTS of KIND for REPOSITORY REVISION in one transaction.
@@ -267,24 +290,22 @@ Return EVENTS."
 (defun git-appraise-store-viewed-snapshot (repo revision actor path)
   "Return the saved diff snapshot for ACTOR's PATH in REPO REVISION."
   (when-let* ((key (git-appraise-store-repo-key repo)))
-    (pcase-let ((`(,sql . ,params)
-                 (git-appraise-sql-select
-                  :from 'viewed_snapshots :columns '(diff)
-                  :where `(:and (= repo ,key) (= revision ,revision)
-                                (= actor ,actor) (= path ,path)))))
-      (caar (sqlite-select (git-appraise-store-db) sql params)))))
+    (caar (emacsql (git-appraise-store-db)
+                   [:select [diff] :from viewed-snapshots
+                    :where (and (= repo $s1) (= revision $s2)
+                                (= actor $s3) (= path $s4))]
+                   key revision actor path))))
 
 (defun git-appraise-store-viewed-snapshots (repo revision actor)
   "Return ACTOR's viewed diff snapshots for REPO REVISION by path."
   (let ((table (make-hash-table :test #'equal)))
     (when-let* ((key (git-appraise-store-repo-key repo)))
-      (pcase-let ((`(,sql . ,params)
-                   (git-appraise-sql-select
-                    :from 'viewed_snapshots :columns '(path diff)
-                    :where `(:and (= repo ,key) (= revision ,revision)
-                                  (= actor ,actor)))))
-        (--each (sqlite-select (git-appraise-store-db) sql params)
-          (puthash (car it) (cadr it) table))))
+      (--each (emacsql (git-appraise-store-db)
+                       [:select [path diff] :from viewed-snapshots
+                        :where (and (= repo $s1) (= revision $s2)
+                                    (= actor $s3))]
+                       key revision actor)
+        (puthash (car it) (cadr it) table)))
     table))
 
 (defun git-appraise-store-save-viewed-snapshot (repo revision actor path diff)
@@ -298,7 +319,7 @@ Return EVENTS."
 
 (defun git-appraise-store--encode-comments (comments)
   "Encode the LOCAL-COMMENTS entries as JSON text; nil is an empty array."
-  (if comments (json-encode comments) "[]"))
+  (if comments (substring-no-properties (json-encode comments)) "[]"))
 
 (defun git-appraise-store--decode-comments (text)
   "Decode stored LOCAL-COMMENTS JSON text into a list of entries."
@@ -308,22 +329,14 @@ Return EVENTS."
     (json-read-from-string text)))
 
 (defun git-appraise-store-pr-state (repo revision actor)
-  "The latest snapshot for ACTOR at REPOSITORY REVISION, or nil.
-Latest is the highest record version, then the newest `at', then
-the largest id: the same precedence the notes reader applied to
-review-revision records over legacy ones."
+  "The current draft for ACTOR at REPOSITORY REVISION, or nil."
   (if-let* ((repo-key (git-appraise-store-repo-key repo)))
-      (pcase-let* ((`(,sql . ,params)
-                    (git-appraise-sql-select
-                     :from 'pr_state
-                     :columns '(v id feedback local_comments at_us)
-                     :where `(:and (= repo ,repo-key)
-                                   (= revision ,revision)
-                                   (= actor ,actor))
-                     :order-by '((v desc) (at_us desc) (id desc))
-                     :limit 1))
-                   (row (car (sqlite-select (git-appraise-store-db)
-                                            sql params))))
+      (let ((row (car (emacsql (git-appraise-store-db)
+                               [:select [v id feedback local-comments at-us]
+                                :from pr-state
+                                :where (and (= repo $s1) (= revision $s2)
+                                            (= actor $s3))]
+                               repo-key revision actor))))
         (when row
           (pcase-let ((`(,v ,id ,feedback ,comments ,at-us) row))
             `((v . ,v)
@@ -334,38 +347,38 @@ review-revision records over legacy ones."
     nil))
 
 (defun git-appraise-store-save-pr-state (repo revision actor snapshot)
-  "Append SNAPSHOT for ACTOR at REPOSITORY REVISION, atomically.
+  "Replace ACTOR's draft at REPOSITORY REVISION with SNAPSHOT atomically.
 The snapshot carries (v id feedback local_comments at): `feedback'
 a string or nil, `local_comments' a list of raw comment entries.
 Any failure signals, leaving the store unchanged.  Return
 SNAPSHOT."
   (let* ((repo-key (or (git-appraise-store-repo-key repo)
                        (error "No review repository to save the draft in")))
-         (db (git-appraise-store-db))
          (feedback (a-get snapshot 'feedback))
          (row (progn
                 (unless (stringp revision)
                   (error "Snapshot needs a review revision"))
-                (list repo-key
-                      revision
-                      (or actor (error "Snapshot without actor"))
-                      (or (a-get snapshot 'v) (error "Snapshot without version"))
-                      (or (a-get snapshot 'id) (error "Snapshot without id"))
-                      (and (stringp feedback) (not (string-empty-p feedback))
-                           feedback)
-                      (git-appraise-store--encode-comments
-                       (a-get snapshot 'local_comments))
-                      (or (git-appraise-time-parse-utc (a-get snapshot 'at))
-                          (error "Bad timestamp in snapshot"))))))
+                (vector repo-key
+                        (substring-no-properties revision)
+                        (substring-no-properties
+                         (or actor (error "Snapshot without actor")))
+                        (or (a-get snapshot 'v) (error "Snapshot without version"))
+                        (substring-no-properties
+                         (or (a-get snapshot 'id)
+                             (error "Snapshot without id")))
+                        (and (stringp feedback) (not (string-empty-p feedback))
+                             (substring-no-properties feedback))
+                        (git-appraise-store--encode-comments
+                         (a-get snapshot 'local_comments))
+                        (or (git-appraise-time-parse-utc (a-get snapshot 'at))
+                            (error "Bad timestamp in snapshot"))))))
     (git-appraise-store--call-in-write
      (lambda ()
-       (pcase-let ((`(,sql . ,params)
-                    (git-appraise-sql-insert
-                     :into 'pr_state
-                     :columns '(repo revision actor v id feedback local_comments at_us)
-                     :rows (list row)
-                     :on-conflict :ignore)))
-         (sqlite-execute db sql params))))
+       (emacsql (git-appraise-store-db)
+                [:insert-or-replace-into pr-state
+                 [repo revision actor v id feedback local-comments at-us]
+                 :values $v1]
+                row)))
     snapshot))
 
 (provide 'git-appraise-store)

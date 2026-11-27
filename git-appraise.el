@@ -5,7 +5,7 @@
 ;; Version: 0.0.7
 ;; Keywords: git, tools, vc
 ;; Homepage: https://github.com/corpix/git-appraise.el
-;; Package-Requires: ((emacs "29.1") (magit "3.0.0") (transient "0.3.7") (a "1.0.0") (uuidgen "1.2") (deferred "0.5.1") (markdown-mode "2.4") (emojify "1.2") (s "1.13.1") (dash "2.19.1"))
+;; Package-Requires: ((emacs "29.1") (magit "3.0.0") (transient "0.3.7") (a "1.0.0") (uuidgen "1.2") (deferred "0.5.1") (markdown-mode "2.4") (emojify "1.2") (s "1.13.1") (dash "2.19.1") (emacsql "4.0"))
 ;;
 ;; This file is not part of GNU Emacs
 

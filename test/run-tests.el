@@ -16,13 +16,11 @@
 (require 'git-appraise)
 (require 'cl-lib)
 
-;; the suite writes review state: pin the store to a throwaway
-;; database for the whole run, never the user's real one
+;; The suite writes review state only to an in-memory database by default.
 (require 'sqlite)
 (unless (sqlite-available-p)
   (error "This test suite needs an Emacs built with SQLite support"))
-(setq git-appraise-store-file
-      (make-temp-file "git-appraise-test-store-default-" nil ".sqlite"))
+(setq git-appraise-store-file nil)
 
 ;; render tests assert SYNCHRONOUS content: the deferred analysis
 ;; (placeholder + background child) has its own dedicated test,

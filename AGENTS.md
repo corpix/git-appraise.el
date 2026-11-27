@@ -33,10 +33,8 @@ affect the user's live Emacs immediately.
 | `git-appraise-viewed.el` | viewed state and its projection onto the diff |
 | `git-appraise-pr-state.el` | unsent feedback/draft persistence (store-backed) |
 | `git-appraise-db.el` | in-memory review state; durable state lives in the store |
-| `git-appraise-sql.el` | query builder returning `(SQL . PARAMS)` for native sqlite |
-| `git-appraise-store.el` | SQLite store: connection, migrations runner, CRUD (`~/.emacs.d/git-appraise/state.sqlite`) |
-| `git-appraise-store-migrations.el` | versioned schema registry (`PRAGMA user_version`) |
-| `git-appraise-store-import.el` | one-shot legacy git-notes import (`M-x git-appraise-import-git-notes`); deletable later |
+| `git-appraise-store.el` | EmacSQL SQLite store: connection and CRUD (`~/.emacs.d/git-appraise/state.sqlite`) |
+| `git-appraise-store-schema.el` | fresh schema and incompatible-store guard |
 | `git-appraise-browse.el` | browse-url integration |
 | `git-appraise-folding.el` | fold commands |
 | `git-appraise-actions.el` | interactive/navigation commands |
@@ -79,10 +77,10 @@ Tests are plain ERT run by `test/run-tests.el` in a batch `emacs -Q`
 ### Test conventions
 
 - DB-touching tests run inside `git-appraise-test--with-db` / a repo
-  harness: the store file is pinned to a fresh `/tmp` sqlite for the
-  whole batch by `test/run-tests.el`; the user's real database is
-  never touched. `git-appraise-test--reset-db` also closes the store
-  connection (that is how the "restart" tests simulate a reopen).
+  harness: `test/run-tests.el` pins the store to in-memory SQLite;
+  only close-and-reopen tests use disposable `/tmp` files. The user's
+  real database is never touched. `git-appraise-test--reset-db` also
+  closes the store connection.
 - Section assertions use `git-appraise-test--sections-match`.
 - ERT names are `file-name/description` (slash form).
 
@@ -269,7 +267,7 @@ Tests are plain ERT run by `test/run-tests.el` in a batch `emacs -Q`
 ### DB and persistence
 
 - `git-appraise-db` is an in-memory hash table (`git-appraise-db--objects`); `git-appraise-db-update` stores in memory. Durable personal state is SQLite (`git-appraise-store.el`), not closql.
-- Personal state (viewed/fold events, pr-state snapshots) lives in the store under the repository's canonical common git dir; the import job (`git-appraise-store-import.el`) moves legacy `refs/notes/git-appraise-el/*` notes in and deletes the refs. Hydrate on pullreq create; persist on feedback/draft mutations.
+- Personal state (viewed events, current folds and drafts) lives in the EmacSQL store under the repository's canonical common git dir. Hydrate on pullreq create; persist on feedback/draft mutations. Older native-sqlite databases are incompatible and must be reset by the user.
 - Strings persisted to the store/JSON should be `substring-no-properties`'d.
 - An untagged file has a PRESENT hash key with nil value — use a missing-key sentinel.  Likewise, a truthy cache-miss sentinel inside `or` short-circuits and leaks: use the two-step let/if.
 - `slot-boundp` on nil signals; guard with `(and obj (slot-boundp obj 'slot))`.

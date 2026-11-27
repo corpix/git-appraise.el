@@ -67,13 +67,13 @@ Same buffer lifetime as `git-appraise-section--viewed'.")
   "The review revision the marks are anchored on, or nil."
   (ignore-errors (oref (git-appraise-db-get-pullreq) number)))
 
-(defun git-appraise-viewed--load (repo revision)
+(defun git-appraise-viewed--load (repo revision &optional actor)
   "The stored viewed events for REPO and REVISION.
 A repository without state, or a store failure, is no events: a
 broken store must never masquerade as a provider error."
   (or (and repo revision
            (condition-case err
-               (git-appraise-store-events repo revision 'viewed)
+               (git-appraise-store-events repo revision 'viewed actor)
              (error
               (git-appraise-utils--log
                "git-appraise-viewed--load" (prin1-to-string err))
@@ -98,7 +98,8 @@ the same marks."
     (setq git-appraise-section--viewed
           (git-appraise-viewed--project
            (if (and repo revision)
-               (git-appraise-viewed--load repo revision)
+               (git-appraise-viewed--load
+                repo revision (git-appraise-viewed--actor repo))
              nil)
            (and repo (git-appraise-viewed--actor repo))
            git-appraise-viewed--buffer-inventory))

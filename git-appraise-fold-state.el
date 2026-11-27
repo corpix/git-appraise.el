@@ -31,9 +31,9 @@
   (list (a-get event 'item) (a-get event 'path)
         (a-get event 'fingerprint) (a-get event 'range)))
 
-(defun git-appraise-fold-state--read (repo revision)
+(defun git-appraise-fold-state--read (repo revision &optional actor)
   "The stored fold events for REVISION in REPO."
-  (git-appraise-store-events repo revision 'fold))
+  (git-appraise-store-events repo revision 'fold actor))
 
 (defun git-appraise-fold-state--prepare ()
   "Project saved fold choices onto the current diff inventory."
@@ -43,15 +43,8 @@
          (index (make-hash-table :test #'equal)))
     (when (and repo revision actor)
       (condition-case err
-          (--each (git-appraise-fold-state--read repo revision)
-            (when (equal (a-get it 'actor) actor)
-              (let* ((key (git-appraise-fold-state--event-key it))
-                     (old (gethash key index)))
-                (when (or (not old)
-                          (string< (a-get old 'at) (a-get it 'at))
-                          (and (equal (a-get old 'at) (a-get it 'at))
-                               (string< (a-get old 'id) (a-get it 'id))))
-                  (puthash key it index)))))
+          (--each (git-appraise-fold-state--read repo revision actor)
+            (puthash (git-appraise-fold-state--event-key it) it index))
         (error (message "Fold choices unavailable: %s"
                         (error-message-string err)))))
     (setq git-appraise-fold-state--index index)))

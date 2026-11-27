@@ -102,9 +102,8 @@ personal review store (`git-appraise-store-file`, an SQLite database under
 your Emacs directory). After a file is marked fully viewed, subsequent
 changes to its diff lines receive an orange bar in the left margin. The
 baseline for those bars is stored locally alongside the marks. See
-`docs/viewed-state.md`. Upgrading from an
-earlier version: run `M-x git-appraise-import-git-notes` once per
-repository to move existing marks, folds and drafts out of git notes.
+`docs/viewed-state.md`. The store now uses EmacSQL; reset an older
+`git-appraise-store-file` before opening reviews with this version.
 
 ## Configuration
 

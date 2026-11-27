@@ -3,7 +3,7 @@ set lazy := true
 
 emacs := env_var_or_default('EMACS', 'emacs')
 pkg_dir := env_var_or_default('PKG_DIR', env_var('HOME') + '/.emacs.d/elpa')
-load_path := `printf -- '-L . -L test'; for d in '{{pkg_dir}}'/*; do [ -d "$d" ] && printf ' -L %s' "$d" || true; done`
+load_path := `printf -- '-L . -L test'; for d in "$HOME/.emacs.d/elpa"/* "$HOME/.emacs.d/packages"/*; do [ -d "$d" ] && printf ' -L %s' "$d" || true; done`
 
 # Install package dependencies from MELPA.
 deps:
@@ -12,7 +12,7 @@ deps:
       --eval "(add-to-list 'package-archives '(\"melpa\" . \"https://melpa.org/packages/\") t)" \
       --eval "(package-initialize)" \
       --eval "(package-refresh-contents)" \
-      --eval "(dolist (p (quote (a magit transient uuidgen deferred markdown-mode emojify s dash))) \
+      --eval "(dolist (p (quote (a magit transient uuidgen deferred markdown-mode emojify s dash emacsql))) \
                (unless (package-installed-p p) (package-install p)))" \
       --eval "(message \"deps ok\")"
 
