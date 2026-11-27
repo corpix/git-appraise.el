@@ -83,7 +83,8 @@ Set to nil to disable the marker.  Customize
 magit-section-hide creates the invisibility overlay with rear-advance
 nil, so text inserted at section end leaks visible.  Set rear-advance t
 on the overlay covering section content."
-  (when-let ((content (and (slot-boundp section 'content)
+  (when-let* (((derived-mode-p 'git-appraise-mode))
+              (content (and (slot-boundp section 'content)
                            (oref section content)))
              (end (and (slot-boundp section 'end) (oref section end))))
     (dolist (ov (overlays-in content (min end (1+ content))))

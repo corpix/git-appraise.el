@@ -277,6 +277,59 @@
              (with-current-buffer (git-appraise-pr-buffer-name)
                (substring-no-properties (buffer-string)))))))
 
+;;; req-2026-11-27-009: Magit commands remain available beside review entry
+;; covers: git-appraise.el
+;; covers-fn: git-appraise-magit-dispatch
+;; enforcement: test
+(ert-deftest git-appraise-actions/req-2026-11-27-009-magit-commands ()
+  "WHEN a reviewer uses Magit THE SYSTEM SHALL preserve Magit commands beside review actions."
+  (require 'magit)
+  (should (eq (lookup-key magit-status-mode-map (kbd "R"))
+              'magit-file-rename))
+  (should (eq (lookup-key magit-revision-mode-map (kbd "R"))
+              'magit-file-rename))
+  (should (transient-get-suffix 'magit-dispatch "R")))
+
+;;; req-2026-11-27-010: standard refresh rebuilds the review
+;; covers: git-appraise.el git-appraise-actions.el
+;; covers-fn: git-appraise--revert-buffer, git-appraise-reload
+;; enforcement: test
+(ert-deftest git-appraise-actions/req-2026-11-27-010-standard-refresh ()
+  "WHEN a reviewer refreshes the buffer THE SYSTEM SHALL rebuild the current review."
+  (git-appraise-actions-test-with-repo
+    (git-appraise-actions-test--open-and-render revision)
+    (git-appraise-test--run
+     directory "git-appraise" "comment" "-m" "Standard refresh comment" revision)
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (should (eq (key-binding (kbd "g")) 'revert-buffer))
+      (should (eq (key-binding (kbd "G")) 'git-appraise-reload))
+      (revert-buffer nil t))
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (should (string-match-p "Standard[ \t\n]+refresh[ \t\n]+comment"
+                              (substring-no-properties (buffer-string)))))))
+
+;;; req-2026-11-27-011: unrelated Magit folds keep their own visibility
+;; covers: git-appraise-folding.el
+;; covers-fn: git-appraise-folding--fix-hidden-overlay
+;; enforcement: test
+(ert-deftest git-appraise-actions/req-2026-11-27-011-magit-fold-isolation ()
+  "WHEN a Magit section folds THE SYSTEM SHALL leave its visibility behavior intact."
+  (with-temp-buffer
+    (magit-section-mode)
+    (let ((inhibit-read-only t))
+      (magit-insert-section (root)
+        (magit-insert-section (example)
+          (magit-insert-heading "Example")
+          (insert "Body\n"))))
+    (let* ((section (car (oref magit-root-section children)))
+           (_ (magit-section-hide section))
+           (content (oref section content))
+           (overlay (--first (overlay-get it 'invisible)
+                             (overlays-at content))))
+      (should overlay)
+      (should-not (overlay-get overlay 'rear-advance)))))
+
 ;;; req-2026-11-23-014: PR description popup shows title and body
 ;; covers: git-appraise-actions.el
 ;; covers-fn: git-appraise-popup-pr-description, git-appraise-pr-description-insert

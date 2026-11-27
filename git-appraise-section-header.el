@@ -51,16 +51,6 @@
 
 
 
-(defclass git-appraise-url-section (magit-section)
-  ((keymap :initform 'git-appraise-url-section-map)
-   (url :initarg :url)))
-(defvar git-appraise-url-section-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "RET") 'browse-url)
-    (define-key map [mouse-2] 'browse-url)
-    (define-key map [follow-link] 'browse-url)
-    map)
-  "Keymaps for header url section.")
 (defclass git-appraise-author-section (magit-section)
   ((keymap :initform 'git-appraise-author-section-map)
    (login :initarg :login)
@@ -74,19 +64,6 @@
   (insert (apply #'propertize value props))
   (insert ?\n))
 
-(defun git-appraise-section-insert-url ()
-  "Insert the author of the PR in the buffer."
-  (let ((url (ignore-errors (oref (git-appraise-db-get-pullreq) url))))
-    (when url
-      (let ((obj (git-appraise-url-section
-                  :url url)))
-        (magit-insert-section (git-appraise-author-section obj)
-          (git-appraise-section--insert-field
-           "Url: " (format "%s" url)
-           'face 'git-appraise-url-header-face
-           'mouse-face 'git-appraise-hover-face
-           'help-echo "Visit PR url"
-           'keymap 'git-appraise-url-section-map))))))
 (defclass git-appraise-files-summary-section (magit-section)
   ())
 (defun git-appraise-section-insert-files-summary ()
@@ -166,142 +143,6 @@ from review infos when available, otherwise from the raw diff text
       (insert (propertize " ... " 'font-lock-face 'magit-dimmed))
       (insert (oref pr head-ref-name))
       (insert ?\n))))
-(defclass git-appraise-milestone-section (magit-section)
-  ((keymap :initform 'git-appraise-milestone-section-map)
-   (title  :initarg :title)
-   (perc   :initarg :perc)
-   (number :initarg :number
-           :type number)))
-(defvar git-appraise-milestone-section-map
-  (make-sparse-keymap)
-  "Keymaps for milestone section.")
-(defun git-appraise-section-insert-milestone ()
-  "Insert the milestone of the header buffer."
-  (let ((milestones (git-appraise-db--pullreq-milestones)))
-    (let-alist milestones
-      (let* ((title (when (not (string-empty-p .title)) .title))
-             (obj (git-appraise-milestone-section :title title :perc .perc)))
-        (magit-insert-section (git-appraise-milestone-section obj)
-          (insert (format "%-17s" "Milestone: "))
-          (insert (propertize (git-appraise-pretty-milestone obj) 'font-lock-face 'magit-dimmed))
-          (insert ?\n))))))
-(defclass git-appraise-labels-section (magit-section)
-  ((keymap :initform 'git-appraise-labels-section-map)
-   (labels :initarg :labels)))
-(defvar git-appraise-labels-section-map
-  (make-sparse-keymap)
-  "Keymaps for code-comment sections.")
-(defun git-appraise-section-insert-labels ()
-  "Insert the labels of the header buffer."
-  (let* ((infos (git-appraise-db--pullreq-raw-infos))
-         (labels (git-appraise--distinct-labels
-                  (append (git-appraise-db--pullreq-labels)
-                          (a-get-in infos (list 'labels 'nodes)))))
-         (obj (git-appraise-labels-section :labels labels)))
-    (magit-insert-section (git-appraise-labels-section obj)
-      (insert (format "%-17s" "Labels: "))
-      (if labels
-          (dolist (label labels)
-            (insert (a-get label 'name))
-            (let* ((raw-color (a-get label 'color))
-                   (color (if (string-prefix-p "#" raw-color)
-                              raw-color
-                            (concat "#" raw-color)))
-                   (background (git-appraise-utils--sanitize-color color))
-                   (foreground (git-appraise-utils--contrast-color color))
-                   (o (make-overlay (- (point) (length (a-get label 'name))) (point))))
-              (overlay-put o 'priority 2)
-              (overlay-put o 'evaporate t)
-              (overlay-put o 'font-lock-face
-                           `((:background ,background)
-                             (:foreground ,foreground)
-                             git-appraise-topic-label-face)))
-            (insert " "))
-        (git-appraise-section--insert-dimmed "None yet"))
-      (insert ?\n))))
-(defclass git-appraise-assignees-section (magit-section)
-  ((keymap :initform 'git-appraise-assignees-section-map)
-   (assignees :initarg :assignees)))
-(defvar git-appraise-assignees-section-map
-  (make-sparse-keymap)
-  "Keymaps for code-comment sections.")
-(defclass git-appraise-assignee-section (magit-section)
-  ((keymap :initform 'git-appraise-assignee-section-map)
-   (name :initarg :name)
-   (url :initarg :url)))
-(defvar git-appraise-assignee-section-map
-  (make-sparse-keymap)
-  "Keymaps for assignee section")
-(defun git-appraise-section--insert-assignee-action (label)
-  "Insert the LABEL action link (the set-assignee actions)."
-  (insert (propertize label
-                      'font-lock-face 'git-appraise-dimmed
-                      'mouse-face 'git-appraise-hover-face
-                      'help-echo "Set new assignee"
-                      'keymap 'git-appraise-assignees-section-map)))
-(defun git-appraise-section--insert-assignee-line (assignee)
-  "Insert one ASSIGNEE (a name/url alist) as its own section."
-  (let-alist assignee
-    (let ((assignee-obj (git-appraise-assignee-section
-                         :name .name
-                         :url .url)))
-      (magit-insert-section (git-appraise-assignee-section assignee-obj)
-        (insert (propertize .name
-                            'face 'git-appraise-author-header-face
-                            'mouse-face 'git-appraise-hover-face
-                            'help-echo "Visit author's page"
-                            'keymap 'git-appraise-assignee-section-map))))))
-(defun git-appraise-section-insert-assignee ()
-  "Insert the assignee of the header buffer."
-  (let* ((infos (git-appraise-db--pullreq-assignees))
-         (assignee-names (-map
-                          (lambda (a)
-                            (let ((name
-                                   (if (a-get a 'name)
-                                       (format "%s (@%s)"
-                                               (a-get a 'name)
-                                               (a-get a 'login))
-                                     (format "@%s" (a-get a 'login)))))
-                              `((name . ,name)
-                                (url . ,(a-get a 'url)))))
-                          infos)))
-    (magit-insert-section (git-appraise-assignees-section)
-      (insert (format "%-17s" "Assignees: "))
-      (if (not assignee-names)
-          (git-appraise-section--insert-assignee-action
-           "No one — Assign yourself")
-        (progn
-          (git-appraise-section--insert-assignee-action "Set new assignee")
-          (insert ?\n)
-          (dolist (assignee assignee-names)
-            (git-appraise-section--insert-assignee-line assignee))
-          (insert ?\n)))
-      (insert ?\n))))
-(defclass git-appraise-project-section (magit-section)
-  ((name :initarg :name)))
-(defun git-appraise-section-insert-project ()
-  "Insert the project of the header buffer."
-  (let-alist (git-appraise-db--pullreq-raw-infos)
-    (let* ((project-names (-map
-                           (lambda (p)
-                             (a-get-in p (list 'project 'name)))
-                           .projectCards.nodes))
-           (projects (if project-names
-                         (string-join project-names ", ")
-                       (git-appraise-section--dimmed "None yet"))))
-      (magit-insert-section (git-appraise-project-section projects)
-        (insert (format "%-17s" "Projects: ") projects)
-        (insert ?\n)))))
-(defclass git-appraise-is-draft-section (magit-section)
-  ((draft? :initform nil
-           :type (or null string))))
-(defun git-appraise-section-insert-is-draft ()
-  "Insert the isDraft value of the header buffer."
-  (let-alist (git-appraise-db--pullreq-raw-infos)
-    (let* ((draft? (if .isDraft "true" "false")))
-      (magit-insert-section (git-appraise-is-draft-section draft?)
-        (insert (format "%-17s" "Draft: ") draft?)
-        (insert ?\n)))))
 (defclass git-appraise-reviewers-section (magit-section)
   (()))
 (defclass git-appraise-reviewer-section (magit-section)
@@ -595,24 +436,9 @@ Local diff reviews are read-only: no feedback section."
             (insert (propertize "Leave a comment here." 'font-lock-face 'magit-dimmed))))
         (insert ?\n)
         (insert ?\n))))))
-(cl-defmethod git-appraise-pretty-milestone ((obj git-appraise-milestone-section))
-  "Get the pretty version of milestone for a given OBJ."
-  (cond
-   ((and (oref obj title) (oref obj perc))
-    (format "%s (%0.2f%%)"
-            (oref obj title)
-            (oref obj perc)))
-   ((oref obj title)
-    (oref obj title))
-   (t
-    "No milestone")))
 ;; `defvar' does not replace maps in a running Emacs after `load'.
 (--each '(git-appraise-author-section-map
           git-appraise-title-section-map
-          git-appraise-milestone-section-map
-          git-appraise-labels-section-map
-          git-appraise-assignees-section-map
-          git-appraise-assignee-section-map
           git-appraise-reviewer-section-map
           git-appraise-commit-section-map
           git-appraise-commit-check-detail-section-map

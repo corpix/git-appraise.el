@@ -29,7 +29,7 @@ none, Emacs offers to create one. You can also run
 `M-x git-appraise-backend-request` to create a request directly. Its prompts
 cover the source branch, target branch, message, and optional reviewers. An
 empty message uses the reviewed commit's message. In Magit status or revision,
-press `R`, then `o` to open a review or `n` to create one.
+press `? R`, then `o` to open a review or `n` to create one.
 
 See [Local git-appraise reviews](docs/git-appraise.md) for the CLI setup and a
 full local workflow.
@@ -139,7 +139,7 @@ other reviewers' comments are customizable through the
 `git-appraise-comment-other-bg` faces.
 
 The backend invokes the local `git-appraise` CLI. Use `git-appraise-push-notes`
-/ `git-appraise-pull-notes` (or the `R`/`r` manage menus) to sync git-appraise
+/ `git-appraise-pull-notes` (or the `? R`/`r` manage menus) to sync git-appraise
 notes with a remote. Personal marks and drafts live in the local store and are
 never pushed by `git-appraise push`.
 

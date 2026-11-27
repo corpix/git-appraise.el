@@ -67,10 +67,6 @@ Only `appraise' is supported."
   :group 'git-appraise
   :type 'hook)
 
-(defun git-appraise-auth-source-debug ()
-  "Compatibility no-op."
-  (setq-local auth-source-debug (lambda (&rest _))))
-
 ;;;###autoload
 (defun git-appraise-start (url)
   "Start a review from a git-appraise revision.
@@ -139,11 +135,7 @@ offers local reviews instead of prompting for a URL."
             (transient-get-suffix 'magit-dispatch "R"))
     (transient-append-suffix
       'magit-dispatch 'magit-info
-      '("R" "Code review" git-appraise-magit-dispatch)))
-  (when (boundp 'magit-status-mode-map)
-    (define-key magit-status-mode-map (kbd "R") #'git-appraise-magit-dispatch))
-  (when (boundp 'magit-revision-mode-map)
-    (define-key magit-revision-mode-map (kbd "R") #'git-appraise-magit-dispatch)))
+      '("R" "Code review" git-appraise-magit-dispatch))))
 
 (transient-define-prefix git-appraise-transient-api ()
   "Git Appraise."
@@ -197,6 +189,7 @@ offers local reviews instead of prompting for a URL."
 
 (define-derived-mode git-appraise-mode magit-section-mode "Git Appraise"
   "Git Appraise mode."
+  (setq-local revert-buffer-function #'git-appraise--revert-buffer)
   (add-hook 'after-change-functions #'git-appraise--after-change nil t)
   (when (boundp 'magit-section-highlight-current)
     (setq-local magit-section-highlight-current nil))
@@ -205,15 +198,14 @@ offers local reviews instead of prompting for a URL."
   (when (bound-and-true-p hl-line-mode)
     (hl-line-mode -1)))
 
+(defun git-appraise--revert-buffer (&rest _)
+  "Refresh the current review through `revert-buffer'."
+  (git-appraise-reload))
+
 (defcustom git-appraise-post-hook nil
   "Hook run after the Git Appraise buffer is fully loaded and rendered."
   :group 'git-appraise
   :type 'hook)
-
-(defun git-appraise-kill-pr-url (_jump?)
-  "No URL for git-appraise reviews."
-  (interactive "P")
-  (user-error "Git-appraise reviews have no URL"))
 
 (provide 'git-appraise)
 ;;; git-appraise.el ends here

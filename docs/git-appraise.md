@@ -32,7 +32,7 @@ them as needs-work findings. `C-c C-f` on a draft exempts it as FYI in a
 needs-work batch. With no actionable draft, `r r` asks for a summary and
 publishes that as a needs-work comment. `RET` on a previous comment opens an
 ordinary reply; `C-c C-r` publishes a reply that marks that finding addressed.
-Use `r a` to accept and `r R` for explicit rejection. `G` reloads from local
+Use `r a` to accept and `r R` for explicit rejection. `g` or `G` reloads from local
 Git while retaining unsent drafts, even when the branch has gained commits.
 An inline draft on an old head must be re-anchored before it can be sent.
 Git-appraise derives the review's status from its comment threads: an
