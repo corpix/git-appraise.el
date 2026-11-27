@@ -72,6 +72,8 @@
     (with-current-buffer (git-appraise-pr-buffer-name)
       (goto-char (point-min))
       (search-forward "+changed")
+      (magit-section-show
+       (git-appraise-eldoc--file-section (magit-current-section)))
       (beginning-of-line)
       (execute-kbd-macro (kbd "RET")))
     (with-current-buffer git-appraise-comment-buffer-name
@@ -83,7 +85,10 @@
     (with-current-buffer (git-appraise-pr-buffer-name)
       (goto-char (point-min))
       (search-forward "First finding")
-      (beginning-of-line)
+      (magit-section-show
+       (git-appraise-eldoc--file-section (magit-current-section)))
+      (backward-char)
+      (should-not (get-char-property (point) 'cursor-intangible))
       (execute-kbd-macro (kbd "RET")))
     (with-current-buffer git-appraise-comment-buffer-name
       (erase-buffer)

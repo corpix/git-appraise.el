@@ -75,6 +75,10 @@
     (with-current-buffer (git-appraise-pr-buffer-name)
       (goto-char (point-min))
       (search-forward "Context only")
+      (magit-section-show
+       (git-appraise-eldoc--file-section (magit-current-section)))
+      (backward-char)
+      (should-not (get-char-property (point) 'cursor-intangible))
       (execute-kbd-macro (kbd "C-c C-f")))
     (should (a-get (car (a-get-in
                          (car (git-appraise-db--pullreq-raw-comments))
@@ -142,6 +146,10 @@
     (with-current-buffer (git-appraise-pr-buffer-name)
       (goto-char (point-min))
       (search-forward "Remove this draft")
+      (magit-section-show
+       (git-appraise-eldoc--file-section (magit-current-section)))
+      (backward-char)
+      (should-not (get-char-property (point) 'cursor-intangible))
       (execute-kbd-macro (kbd "C-c C-k")))
     (should-not (cl-find-if
                  (lambda (entry)
