@@ -293,13 +293,6 @@ Optionally define a MSG."
         git-appraise-comment-title? t)
   (git-appraise-comment-add))
 
-;;; Editing comments that were already submitted
-
-(defun git-appraise-edit-remote-comment-at-point ()
-  "Explain why a published git-appraise comment cannot be edited."
-  (interactive)
-  (user-error "Published git-appraise comments are append-only; add a reply instead"))
-
 (cl-defmethod git-appraise-comment-handler-add-or-edit (obj)
   "Add a comment in the OBJ.
 Comments must anchor to a file heading or a patch line: a position

@@ -120,12 +120,15 @@ from review infos when available, otherwise from the raw diff text
   ((state  :initform nil
            :type (or null string))))
 (defun git-appraise-section-insert-state ()
-  "Insert the state of the header buffer."
-  (when-let (state (git-appraise-db--pullreq-state))
-    (let ((value (if state state "none")))
-      (magit-insert-section (git-appraise-state-section value)
-        (insert (format "%-17s" "State: ") value)
-        (insert ?\n)))))
+  "Insert review decision and lifecycle as separate header rows."
+  (let ((pr (git-appraise-db-get-pullreq)))
+    (when pr
+      (dolist (row `(("Decision:" . ,(oref pr decision))
+                     ("Lifecycle:" . ,(oref pr lifecycle))))
+        (when (cdr row)
+          (magit-insert-section (git-appraise-state-section row)
+            (insert (format "%-17s" (car row)) (cdr row))
+            (insert ?\n)))))))
 (defclass git-appraise-ref-section (magit-section)
   ((base   :initarg :base
            :type (or null string))

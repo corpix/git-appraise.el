@@ -1,7 +1,8 @@
 Changes:         3 files; 3 additions, 3 deletions
 Author:          tester@example.com
 Title:           Viewed review
-State:           PENDING
+Decision:        PENDING
+Lifecycle:       OPEN
 Refs:            refs/heads/master ... refs/heads/feature
 Reviewers:
 

@@ -105,23 +105,28 @@
                      (a-get-in child '(comment description))))
       (should (eq t (a-get-in child '(comment resolved)))))))
 
-;;; req-2026-11-25-066: published comments remain append-only
-;; covers: git-appraise-comment.el
-;; covers-fn: git-appraise-edit-remote-comment-at-point
+;;; req-2026-11-25-066: published edits retain the original comment
+;; covers: git-appraise-comment-events.el
+;; covers-fn: git-appraise-comment-events--append-edit
 ;; enforcement: test
-(ert-deftest git-appraise-actions/req-2026-11-25-066-published-comment-is-immutable ()
-  "WHEN a reviewer tries to edit a published comment THE SYSTEM SHALL direct them to add a reply instead."
+(ert-deftest git-appraise-actions/req-2026-11-25-066-published-edit-preserves-original ()
+  "WHEN an author edits a published comment THE SYSTEM SHALL retain its original version in the discussion history."
   (git-appraise-actions-test-with-repo
     (git-appraise-test--run
      directory "git-appraise" "comment" "-m" "Published note" revision)
-    (git-appraise-test--open-and-render revision)
-    (with-current-buffer (git-appraise-pr-buffer-name)
-      (goto-char (point-min))
-      (search-forward "Published")
-      (should-error (git-appraise-edit-remote-comment-at-point)
-                    :type 'user-error))
-    (should (= 1 (length (a-get (git-appraise-actions-test--show
-                                 directory revision) 'comments))))))
+    (let* ((pr (git-appraise-backend-open revision))
+           (thread (car (a-get (git-appraise-actions-test--show
+                                directory revision) 'comments)))
+           (hash (a-get thread 'hash)))
+      (git-appraise-comment-events--append-edit
+       pr hash (a-get thread 'comment) "Corrected note" nil)
+      (let ((updated (car (a-get (git-appraise-actions-test--show
+                                  directory revision) 'comments))))
+        (should (equal (a-get updated 'hash) hash))
+        (should (equal (a-get-in updated '(original description))
+                       "Published note"))
+        (should (equal (a-get-in updated '(comment description))
+                       "Corrected note"))))))
 
 ;;; req-2026-11-24-002: remove an unsent review comment
 ;; covers: git-appraise-actions.el git-appraise-section-comment.el

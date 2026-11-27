@@ -188,6 +188,8 @@
                                :path .path
                                :diffHunk .diffHunk
                                :id .databaseId
+                               :edited? .edited
+                               :edit-history .editHistory
                                :thread-id .threadId
                                :resolved? .isResolved
                                :createdAt .createdAt
@@ -223,6 +225,8 @@
                                :path .path
                                :diffHunk .diffHunk
                                :id .databaseId
+                               :edited? .edited
+                               :edit-history .editHistory
                                :thread-id .threadId
                                :resolved? .isResolved
                                :createdAt .createdAt

@@ -16,6 +16,8 @@
 (require 'git-appraise-utils)
 (require 'git-appraise-fold-state)
 (declare-function git-appraise-comment-add-or-edit "git-appraise-comment")
+(declare-function git-appraise-section--insert-edit-history
+                  "git-appraise-section-comment" (obj))
 
 ;;; general comments - top level comments
 
@@ -35,6 +37,8 @@
            :documentation "Raw (markdown) body as written by the author.
 Used when editing a submitted comment.")
    (id     :initarg :id)
+   (edited? :initarg :edited? :initform nil)
+   (edit-history :initarg :edit-history :initform nil)
    (reactions :initarg :reactions)
    (typename :initarg :typename)
    (face   :initform 'magit-log-author)))
@@ -129,8 +133,10 @@ Omit author when it matches GROUP-AUTHOR."
       (insert ?\n)
       (let ((obj (git-appraise-comment-section
                   :author author :msg (git-appraise-comment--node-body comment)
-                  :id id)))
-        (git-appraise-insert-comment-lines obj))
+                  :id id :edited? (a-get comment 'edited)
+                  :edit-history (a-get comment 'editHistory))))
+        (git-appraise-insert-comment-lines obj)
+        (git-appraise-section--insert-edit-history obj))
       (insert ?\n))))
 
 (defun git-appraise-comment--inline-diff-comment-p (comment)
@@ -189,7 +195,9 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
                      :author (or (a-get-in node (list 'author 'login))
                                  group-author "unknown")
                      :msg (git-appraise-comment--node-body node)
-                     :id (a-get node 'databaseId)))
+                     :id (a-get node 'databaseId)
+                     :edited? (a-get node 'edited)
+                     :edit-history (a-get node 'editHistory)))
                (time (git-appraise-comment-format-time (a-get node 'createdAt))))
           (magit-insert-section (git-appraise-comment-section obj)
             (insert (propertize "Summary" 'face 'magit-section-heading))
@@ -198,22 +206,27 @@ GROUP-AUTHOR suppresses redundant author in inline diff links."
             (magit-insert-heading)
             (insert ?\n)
             (git-appraise-insert-comment-lines obj)
+            (git-appraise-section--insert-edit-history obj)
             (insert ?\n))))
        (t
         (let* ((node (plist-get c :node))
                (obj (git-appraise-comment-section
                      :author (or (a-get-in node (list 'author 'login)) "unknown")
                      :msg (git-appraise-comment--node-body node)
-                     :id (a-get node 'databaseId))))
+                     :id (a-get node 'databaseId)
+                     :edited? (a-get node 'edited)
+                     :edit-history (a-get node 'editHistory))))
           (magit-insert-section (git-appraise-comment-section obj)
             (insert (git-appraise-comment-format-heading
                      (if (a-get node 'parentHash) "Reply" "Comment")
                      (oref obj author) (a-get node 'createdAt)
-                     (unless (equal (a-get node 'state) "COMMENTED")
-                       (list (a-get node 'state)))))
+                     (append (unless (equal (a-get node 'state) "COMMENTED")
+                               (list (a-get node 'state)))
+                             (when (a-get node 'edited) '("EDITED")))))
             (magit-insert-heading)
             (insert ?\n)
             (git-appraise-insert-comment-lines obj)
+            (git-appraise-section--insert-edit-history obj)
             (insert ?\n))))))
        (insert ?\n)))))
 

@@ -120,7 +120,7 @@ The creation flow must run even when the global backend is `url'."
 ;; covers-fn: git-appraise-backend-select-review, git-appraise-backend--review-choice, git-appraise-backend--short-ref, git-appraise-backend--format-unix-time, git-appraise-backend--review-last-comment-ts
 ;; enforcement: test
 (ert-deftest git-appraise-backend-request/req-2026-11-24-126-picker-format ()
-  "WHEN a reviewer selects a local review THE SYSTEM SHALL show refs, creation time, and last comment time."
+  "WHEN a reviewer selects a local review THE SYSTEM SHALL show refs, activity times, decision, and lifecycle."
   (should (equal (git-appraise-backend--short-ref "refs/heads/feature") "feature"))
   (should (equal (git-appraise-backend--short-ref "refs/tags/v1") "refs/tags/v1"))
   (should (equal (git-appraise-backend--short-ref nil) "?"))
@@ -137,7 +137,7 @@ The creation flow must run even when the global backend is `url'."
          (choice (git-appraise-backend--review-choice review))
          (display (plist-get choice :display)))
     (should (equal (plist-get choice :refs) "master..feature"))
-    (should (equal (plist-get choice :state) "PENDING"))
+    (should (equal (plist-get choice :state) "PENDING/OPEN"))
     (should (equal (plist-get choice :rev) "e54430688a4c"))
     (should (equal (plist-get choice :last)
                    (git-appraise-backend--format-unix-time "1795542299")))

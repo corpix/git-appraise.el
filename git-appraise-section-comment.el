@@ -62,6 +62,8 @@
 nil for local comments rendered before the data was available; the
 raw body is what `e' (edit submitted comment) pre-fills the
 comment buffer with.")
+   (edited?    :initarg :edited? :initform nil)
+   (edit-history :initarg :edit-history :initform nil)
    (position   :initarg :position
                :initform nil
                :type (or null number))
@@ -344,6 +346,21 @@ and 100."
              (overlay-put ,ov 'priority ,(or body-ov-priority 100)))
            (git-appraise-section--decorate-inline-comment ,start (point)))))))
 
+(defun git-appraise-section--insert-edit-history (obj)
+  "Insert a folded history of published edits to comment OBJ."
+  (when-let* ((versions (oref obj edit-history)))
+    (git-appraise-section--hide-if-hidden
+     (magit-insert-section (git-appraise-edit-history (oref obj id) t)
+       (magit-insert-heading (format "Edit history (%d)" (length versions)))
+       (dolist (version versions)
+         (insert (format "  %s · %s\n"
+                         (or (a-get version 'author) "unknown")
+                         (or (git-appraise-comment-format-time
+                              (seconds-to-time
+                               (string-to-number
+                                (or (a-get version 'timestamp) "0")))) "")))
+         (insert "  " (or (a-get version 'description) "") "\n\n"))))))
+
 (cl-defmethod git-appraise-comment-insert-lines (obj)
   "Default insert comment lines in the OBJ."
   (magit-insert-section (git-appraise-code-comment-section obj)
@@ -352,12 +369,14 @@ and 100."
                     "Comment" (oref obj author) (oref obj createdAt)
                     (append (unless (equal (oref obj state) "COMMENTED")
                               (list (oref obj state)))
+                            (when (oref obj edited?) '("EDITED"))
                             (when (and (slot-boundp obj 'resolved?)
                                        (oref obj resolved?))
                               '("RESOLVED"))))))
       (git-appraise-section--insert-comment-heading-and-body
        obj 'git-appraise-code-comment-section bgface heading
-       'git-appraise-recent-comment-heading 1 100))))
+       'git-appraise-recent-comment-heading 1 100)
+      (git-appraise-section--insert-edit-history obj))))
 (defun git-appraise-section--comment-bg-face (c)
   "Background face for comment C: self, PR author, or other."
   (let* ((infos (git-appraise-db--pullreq-raw-infos))
@@ -380,12 +399,14 @@ sections with their background overlays."
                   (append '("OUTDATED")
                           (unless (equal (oref c state) "COMMENTED")
                             (list (oref c state)))
+                          (when (oref c edited?) '("EDITED"))
                           (when (and (slot-boundp c 'resolved?)
                                      (oref c resolved?))
                             '("RESOLVED"))))))
     (git-appraise-section--insert-comment-heading-and-body
      c 'git-appraise-outdated-comment-section bgface heading
-     nil 100 100)))
+     nil 100 100)
+    (git-appraise-section--insert-edit-history c)))
 (defun git-appraise-section--insert-outdated-hunk (hunk metadata hunk-comments
                                                   amount-loc-cell)
   "Insert one outdated HUNK (METADATA its section value) and its

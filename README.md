@@ -66,6 +66,9 @@ Press `r` for the command menu. The main actions are:
 | Draft comment | `C-c C-k` | Delete the draft |
 | Draft comment | `C-c C-f` | Mark or unmark the draft as FYI |
 | Published comment | `C-c C-r` | Reply and mark the finding addressed |
+| Published comment | `e` | Edit your comment while retaining its history |
+| Published comment | `C-c C-s` | Set your root comment to FYI or needs-work |
+| Addressed finding | `C-c C-u` | Reopen with a needs-work reply |
 | Comment editor | `C-c C-c` | Save or send the comment |
 | Comment editor | `C-c C-k` | Cancel editing |
 | Review buffer | `C-c C-n` / `C-c C-p` | Move between diff hunks |
@@ -77,6 +80,7 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `G` | Reload the review |
 | Review buffer | `r a` / `r r` / `r c` | Accept, send needs-work findings, or send FYI comments |
 | Review buffer | `r R` | Explicitly reject the review |
+| Review buffer | `r E` | Edit description, reviewers, or target branch |
 | Review buffer | `r l` | Accept with the configured LGTM message |
 | Review buffer | `r s c` | Send a general comment |
 | Review buffer | `r A` | Abandon the current review |
@@ -85,7 +89,9 @@ Press `r` for the command menu. The main actions are:
 | Review buffer | `r L` | Land the current review into its target |
 | Review buffer | `r p` / `r P` | Push or pull git-appraise notes |
 
-Removing a review requires confirmation. It removes the request and discussion
+Removing a review requires confirmation. Emacs checks configured remotes and
+warns when it finds the request note there, or cannot verify a remote. It
+removes the request and discussion
 notes for that commit plus its local viewed marks, folds, and drafts. The Git
 commit remains available for a new review; no garbage collection runs. Removing
 only the request note with Git leaves the separate discussion note, so a new
@@ -93,8 +99,14 @@ request on the same commit inherits old comments and decisions.
 
 `C-c C-r` publishes a native `-lgtm` reply to the selected finding, so its
 thread is resolved in git-appraise and can be exported with its notes.
-Draft comments can be edited or deleted locally. Published comments are
-append-only in git-appraise; reply to correct or clarify one.
+Draft comments can be edited or deleted locally. Editing a published comment
+appends a new version to its Git note; the original and prior versions remain
+in a folded edit history. Only the original author can edit text or switch a
+root comment between FYI and needs-work. Any reviewer can reopen an addressed
+finding with a needs-work reply. Published comments cannot be deleted.
+Edits and removals use a normal notes push. If a remote advanced, pull its
+notes; a merge can restore a removed note, so remove the review again if it
+reappears before pushing. A force push is not needed.
 
 Drafts survive reloads and new commits on the reviewed branch. If the head
 changed, an old inline location must be checked before sending; the draft is

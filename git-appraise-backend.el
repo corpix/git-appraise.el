@@ -39,27 +39,58 @@ STATUS is nil for FYI, `needs-work' or `resolved'."
            (oref pr owner) body
            (append args (list (oref pr number))))))
 
-(defun git-appraise-backend-update-request (pr description)
-  "Append an updated native request for PR with DESCRIPTION.
-Keep the source, target, and reviewers from the current request."
+(defun git-appraise-backend-update-request-fields (pr changes)
+  "Append an updated request for PR with plist CHANGES.
+Supported keys are :description, :reviewers, and :target."
   (let* ((repo (oref pr owner))
          (revision (oref pr number))
-         (request (a-get (git-appraise-backend--read-review repo revision)
-                         'request))
+         (review (git-appraise-backend--read-review repo revision))
+         (request (a-get review 'request))
          (source (a-get request 'reviewRef))
-         (target (a-get request 'targetRef))
-         (reviewers (a-get request 'reviewers)))
+         (target (if (plist-member changes :target)
+                     (plist-get changes :target)
+                   (a-get request 'targetRef)))
+         (reviewers (if (plist-member changes :reviewers)
+                        (plist-get changes :reviewers)
+                      (a-get request 'reviewers)))
+         (description (if (plist-member changes :description)
+                          (plist-get changes :description)
+                        (a-get request 'description)))
+         (actor (git-appraise-backend--git repo "config" "user.email")))
+    (unless (equal actor (a-get request 'requester))
+      (user-error "Only the request author can edit review metadata"))
+    (when (or (eq (a-get review 'submitted) t)
+              (equal (a-get request 'targetRef) ""))
+      (user-error "Only an open review request can be edited"))
     (unless (and (stringp source) (stringp target)
                  (not (string-empty-p source))
                  (not (string-empty-p target)))
       (user-error "Cannot update this review request without its source and target refs"))
+    (unless (string-prefix-p "refs/heads/" target)
+      (user-error "Select a local target branch"))
+    (git-appraise-backend--git repo "rev-parse" "--verify" target)
+    (unless (git-appraise-backend--ancestor-p repo revision source)
+      (user-error "Review anchor is no longer on its source branch"))
+    (when (git-appraise-backend--ancestor-p repo revision target)
+      (user-error "Review anchor is already contained in the target branch"))
     (apply #'git-appraise-backend--run-message
-           repo description
+           repo (or description "")
            (append (list "request" "-F" "-"
                          "-source" source "-target" target)
                    (when reviewers
                      (list "-r" (string-join reviewers ",")))
                    (list revision)))))
+
+(defun git-appraise-backend--ancestor-p (repo ancestor descendant)
+  "Return non-nil if ANCESTOR is on DESCENDANT in REPO."
+  (let ((default-directory (file-name-as-directory repo)))
+    (zerop (process-file "git" nil nil nil "merge-base" "--is-ancestor"
+                         ancestor descendant))))
+
+(defun git-appraise-backend-update-request (pr description)
+  "Append an updated native request for PR with DESCRIPTION."
+  (git-appraise-backend-update-request-fields
+   pr (list :description description)))
 
 (defun git-appraise-backend--line-for-comment (pr comment)
   "Return the head-file line for COMMENT in PR, or signal a useful error.

@@ -117,4 +117,41 @@
       (should (a-get (git-appraise-review-removal-test--show
                       directory revision) 'comments)))))
 
+;;; req-2026-11-27-005: shared review removal warns before deletion
+;; covers: git-appraise-remove.el
+;; covers-fn: git-appraise-remove--warning, git-appraise-remove-review
+;; enforcement: test
+(ert-deftest review-removal/req-2026-11-27-005-warn-if-published ()
+  "WHEN a review has been pushed THE SYSTEM SHALL warn before removing its local notes."
+  (git-appraise-test--with-review-repo "git-appraise-remove-remote-"
+    (let ((remote (make-temp-file "git-appraise-remove-bare-" t)))
+      (unwind-protect
+          (progn
+            (git-appraise-test--run remote "git" "init" "--bare" "-q")
+            (git-appraise-test--run directory "git" "remote" "add" "origin" remote)
+            (git-appraise-test--run directory "git-appraise" "push" "origin")
+            (should (eq 'published
+                        (git-appraise-remove--remote-status
+                         directory "origin" revision)))
+            (let ((buffer (git-appraise-test--open-and-render revision))
+                  prompt)
+              (with-current-buffer buffer
+                (cl-letf (((symbol-function 'yes-or-no-p)
+                           (lambda (question)
+                             (setq prompt question)
+                             t)))
+                  (git-appraise-remove-current-review)))
+              (should (string-match-p "origin" prompt))
+              (should (string-match-p "normal notes push" prompt)))
+            (git-appraise-test--run directory "git-appraise" "push" "origin")
+            (should (eq 'not-published
+                        (git-appraise-remove--remote-status
+                         directory "origin" revision)))
+            (git-appraise-test--run directory "git" "remote" "set-url"
+                                    "origin" (expand-file-name "missing" remote))
+            (should (eq 'unknown
+                        (git-appraise-remove--remote-status
+                         directory "origin" revision))))
+        (delete-directory remote t)))))
+
 ;;; git-appraise-review-removal-test.el ends here

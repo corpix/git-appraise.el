@@ -217,14 +217,16 @@ Return a list (MESSAGE SOURCE TARGET REVIEWERS ALLOW-UNCOMMITTED)."
          (created (git-appraise-backend--format-unix-time (a-get request 'timestamp)))
          (last (git-appraise-backend--format-unix-time
                 (git-appraise-backend--review-last-comment-ts review)))
-         (state (git-appraise-backend--state review))
+         (state (format "%s/%s"
+                        (git-appraise-backend--decision review)
+                        (git-appraise-backend--lifecycle review)))
          (desc (or (car (split-string (or (a-get request 'description) "") "\n" t))
                    ""))
          (desc (if (> (length desc) 60)
                    (concat (substring desc 0 57) "...")
                  desc))
          (rev12 (substring revision 0 (min 12 (length revision)))))
-    (list :display (format "%s..%s  created %s  last %s  %-9s  %s  %s"
+    (list :display (format "%s..%s  created %s  last %s  %s  %s  %s"
                            target source created last state rev12 desc)
           :revision revision
           :refs (format "%s..%s" target source)
@@ -390,12 +392,37 @@ are local: git-appraise notes are not pushed."
 (defun git-appraise-backend--state (review)
   "Return a git-appraise state string for git-appraise REVIEW."
   (let ((resolved (a-get review 'resolved))
-         (submitted (eq (a-get review 'submitted) t)))
+        (submitted (eq (a-get review 'submitted) t))
+        (target (a-get-in review '(request targetRef))))
     (cond
-     ((eq resolved :false) "REJECTED")
+     ((or (null target) (equal target "")) "ABANDONED")
      (submitted "SUBMITTED")
+     ((eq resolved :false) "REJECTED")
      (resolved "APPROVED")
      (t "PENDING"))))
+
+(defun git-appraise-backend--decision (review)
+  "Return the review decision independently of its lifecycle."
+  (pcase (a-get review 'resolved)
+    (:false "REJECTED")
+    ('nil "PENDING")
+    (_ "APPROVED")))
+
+(defun git-appraise-backend--lifecycle (review)
+  "Return the review lifecycle independently of its decision."
+  (let ((target (a-get-in review '(request targetRef))))
+    (cond ((or (null target) (equal target "")) "ABANDONED")
+          ((eq (a-get review 'submitted) t) "LANDED")
+          (t "OPEN"))))
+
+(defun git-appraise-backend--edit-history (thread)
+  "Return the original and chronological edits of native THREAD."
+  (when (a-get thread 'edits)
+    (cons (a-get thread 'original)
+          (cl-sort (copy-sequence (a-get thread 'edits))
+                   #'< :key (lambda (version)
+                               (string-to-number
+                                (or (a-get version 'timestamp) "0")))))))
 
 (defun git-appraise-backend--normalize (review diff head &optional cached-tables)
   "Normalize git-appraise REVIEW and DIFF for the existing UI at HEAD.
@@ -424,6 +451,8 @@ Return a pair of normalized infos and inline comments."
                                  (equal commit head)
                                  (git-appraise-backend--position tables path line)))
                   (hash (a-get thread 'hash))
+                  (edited? (and (a-get thread 'edits) t))
+                  (edit-history (git-appraise-backend--edit-history thread))
                   (root-hash (or root-hash hash))
                   (thread-resolved (a-get thread 'resolved))
                   (author (or (a-get comment 'author) "unknown"))
@@ -445,6 +474,8 @@ Return a pair of normalized infos and inline comments."
                                          (path . ,path)
                                          (position . ,position)
                                          (databaseId . ,hash)
+                                         (edited . ,edited?)
+                                         (editHistory . ,edit-history)
                                          (state . ,state)
                                          (parentHash . ,parent-hash)
                                          (threadId . ,root-hash)
@@ -457,6 +488,8 @@ Return a pair of normalized infos and inline comments."
                        (bodyText . ,(a-get comment 'description))
                        (path . ,path) (line . ,line) (commit . ,commit)
                        (state . ,state) (databaseId . ,hash)
+                       (edited . ,edited?)
+                       (editHistory . ,edit-history)
                        (parentHash . ,parent-hash)
                        (threadId . ,root-hash)
                        (isResolved . ,(eq thread-resolved t))
@@ -470,6 +503,8 @@ Return a pair of normalized infos and inline comments."
                          (bodyHTML . ,(concat "<strong>" (xml-escape-string where)
                                               "</strong><br />" body))
                          (databaseId . ,hash)
+                         (edited . ,edited?)
+                         (editHistory . ,edit-history)
                          (state . ,state)
                          (parentHash . ,parent-hash)
                          (threadId . ,root-hash)
@@ -483,6 +518,8 @@ Return a pair of normalized infos and inline comments."
     (cons
      `((title . ,title)
        (state . ,(git-appraise-backend--state review))
+       (decision . ,(git-appraise-backend--decision review))
+       (lifecycle . ,(git-appraise-backend--lifecycle review))
        (bodyText . ,description)
        (headRefOid . ,head)
        (baseRefName . ,(or (a-get request 'targetRef) ""))

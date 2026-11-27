@@ -8,14 +8,91 @@
 ;;; Code:
 
 (require 'git-appraise-backend)
+(require 'dash)
+(require 'subr-x)
 (require 'git-appraise-store)
 (require 'git-appraise-db)
 (declare-function git-appraise-pr-buffer-name "git-appraise-section" (&optional pr))
 (declare-function git-appraise-store-clear-review "git-appraise-store" (repo revision))
 (defvar git-appraise-comment-review-buffer)
+(defvar git-appraise-review-buffer-pr-id)
 
 (defconst git-appraise-remove--request-ref "refs/notes/devtools/reviews")
 (defconst git-appraise-remove--discussion-ref "refs/notes/devtools/discuss")
+
+(defun git-appraise-remove--remote-tip (root remote)
+  "Return REMOTE's request-notes tip in ROOT, :none, or :unknown.
+The check is read-only and capped at three seconds."
+  (let* ((default-directory (file-name-as-directory root))
+         (process-environment (cons "GIT_TERMINAL_PROMPT=0"
+                                    process-environment))
+         (buffer (generate-new-buffer " *git-appraise-remote-note-check*"))
+         (deadline (+ (float-time) 3.0))
+         (process nil))
+    (unwind-protect
+        (condition-case nil
+            (progn
+              (setq process
+                    (make-process
+                     :name "git-appraise-remote-note-check"
+                     :buffer buffer
+                     :command (list "git" "ls-remote" remote
+                                    git-appraise-remove--request-ref)
+                     :noquery t :sentinel #'ignore))
+              (while (and (process-live-p process)
+                          (< (float-time) deadline))
+                (accept-process-output process 0.05))
+              (if (process-live-p process)
+                  :unknown
+                (if (zerop (process-exit-status process))
+                    (with-current-buffer buffer
+                      (let ((line (string-trim (buffer-string))))
+                        (if (string-empty-p line)
+                            :none
+                          (car (split-string line "[[:space:]]+" t)))))
+                  :unknown)))
+          (error :unknown))
+      (when (and process (process-live-p process))
+        (delete-process process))
+      (kill-buffer buffer))))
+
+(defun git-appraise-remove--remote-status (root remote revision)
+  "Return whether REMOTE currently has a request note for REVISION.
+Result is `published', `not-published', or `unknown'."
+  (let ((tip (git-appraise-remove--remote-tip root remote)))
+    (cond
+     ((eq tip :none) 'not-published)
+     ((eq tip :unknown) 'unknown)
+     ((not (ignore-errors
+             (git-appraise-backend--git
+              root "cat-file" "-e" (concat tip "^{commit}"))
+             t))
+      'unknown)
+     ((let ((paths (split-string
+                    (git-appraise-backend--git
+                     root "ls-tree" "-r" "--name-only" tip)
+                    "\n" t)))
+        (--any? (equal (replace-regexp-in-string "/" "" it) revision)
+                paths))
+      'published)
+     (t 'not-published))))
+
+(defun git-appraise-remove--warning (root revision)
+  "Return a sharing warning for ROOT's REVISION across configured remotes."
+  (let ((remotes (split-string
+                  (git-appraise-backend--git root "remote") "\n" t))
+        published unknown)
+    (dolist (remote remotes)
+      (pcase (git-appraise-remove--remote-status root remote revision)
+        ('published (push remote published))
+        ('unknown (push remote unknown))))
+    (concat
+     (when published
+       (format "Review note exists on %s. The next normal notes push will share this removal. "
+               (string-join (nreverse published) ", ")))
+     (when unknown
+       (format "Could not verify %s; the review may be shared. "
+               (string-join (nreverse unknown) ", "))))))
 
 (defun git-appraise-remove--note-exists-p (root ref revision)
   "Return non-nil if REF has a note on REVISION in ROOT."
@@ -92,17 +169,22 @@ notes refs; no garbage collection is performed."
 (defun git-appraise-remove-review (revision)
   "Remove local review REVISION and its discussion and personal state."
   (interactive (list (git-appraise-backend-select-review)))
-  (unless (yes-or-no-p
-           (format "Remove local review %s, its comments, and personal state? "
-                   revision))
+  (let* ((root (git-appraise-backend--root))
+         (warning (git-appraise-remove--warning root revision)))
+    (unless (yes-or-no-p
+             (concat warning
+                     (format "Remove local review %s, its comments, and personal state? "
+                             revision)))
     (user-error "Review removal cancelled"))
-  (git-appraise-remove-review-notes (git-appraise-backend--root) revision)
+    (git-appraise-remove-review-notes root revision))
   (message "Removed local review %s" revision))
 
 (defun git-appraise-remove-current-review ()
   "Remove the review shown in the current buffer."
   (interactive)
-  (let ((pr (git-appraise-db-get-pullreq)))
+  (let ((pr (and (bound-and-true-p git-appraise-review-buffer-pr-id)
+                 (gethash git-appraise-review-buffer-pr-id
+                          git-appraise-db--objects))))
     (unless pr
       (user-error "No review is open"))
     (let ((default-directory (file-name-as-directory (oref pr owner))))

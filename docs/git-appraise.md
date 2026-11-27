@@ -43,6 +43,16 @@ unaddressed `-nmw` finding makes the CLI report the review as rejected. The
 explicit `r R` action adds a review-wide rejection event; `r a` adds an
 acceptance event. A resolving reply addresses its parent finding without
 silently accepting the whole review.
+The header shows the review decision and lifecycle separately. Decision is
+pending, approved, or rejected; lifecycle is open, abandoned, or landed.
+
+Use `r E` to edit the request's description, reviewer list, or target branch.
+The source branch and original review anchor stay fixed. A comment's original
+author can edit it with `e`; `C-c C-s` changes their root comment between
+FYI and needs-work. `C-c C-u` reopens an addressed finding with a needs-work
+reply. Published edits append new discussion events, leaving a foldable history
+under the comment. The CLI lacks an edit command, so the package writes the
+schema-supported edit event directly to the Git discussion note.
 
 git-appraise stores requests and published comments in its shared Git notes.
 Unsent drafts and progress marks live in the personal SQLite store
@@ -58,11 +68,16 @@ cannot create a comment on a removed line of
 the current diff because that line is absent from the review head file.
 
 Use `r D` in a review buffer, or `? R D` from Magit, to remove a local review.
-After confirmation, this removes the request and discussion notes for its
+Before confirmation, Emacs checks configured remotes and warns when it finds
+the request note there or cannot verify a remote. After confirmation, removal
+clears the request and discussion notes for its
 commit and clears its local drafts, viewed marks, and folds. The commit is not
 deleted, and no garbage collection runs. Removing only the request note with
 `git notes` leaves the separate discussion note; requesting the same commit
 again then brings back its old comments and decision.
+These note changes push normally. If another person updated the remote notes,
+pull and merge them first. A merge can restore a removed note, so repeat the
+removal if it reappears before pushing. Do not force-push the notes ref.
 
 `TAB` on a listed commit folds the commits group and returns to its heading.
 

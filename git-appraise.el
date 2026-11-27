@@ -20,6 +20,8 @@
 (require 'git-appraise-diff)
 (require 'git-appraise-section)
 (require 'git-appraise-comment)
+(require 'git-appraise-comment-events)
+(require 'git-appraise-request-edit)
 (require 'git-appraise-utils)
 (require 'git-appraise-db)
 (require 'git-appraise-faces)
@@ -29,6 +31,7 @@
 (declare-function git-appraise-viewed-mark-and-fold "git-appraise-folding")
 (declare-function git-appraise-viewed-mark-file-and-fold "git-appraise-folding")
 (require 's)
+(defvar git-appraise-review-buffer-pr-id)
 
 (defgroup git-appraise nil
   "Git Appraise tool for git-appraise."
@@ -68,6 +71,14 @@ Only `appraise' is supported."
   :group 'git-appraise
   :type 'hook)
 
+(defun git-appraise-review-open-p ()
+  "Whether the current review can still receive outcome actions."
+  (let ((pr (or (and (boundp 'git-appraise-review-buffer-pr-id)
+                     (gethash git-appraise-review-buffer-pr-id
+                              git-appraise-db--objects))
+                (git-appraise-db-get-pullreq))))
+    (and pr (equal (oref pr lifecycle) "OPEN"))))
+
 ;;;###autoload
 (defun git-appraise-start (url)
   "Start a review from a git-appraise revision.
@@ -96,7 +107,10 @@ offers local reviews instead of prompting for a URL."
 (transient-define-prefix git-appraise-help ()
   "Show the commands available while reading a git-appraise."
   [["At point"
-    ("c" "Comment" git-appraise-comment-add-or-edit)]
+    ("c" "Comment" git-appraise-comment-add-or-edit)
+    ("e" "Edit published comment" git-appraise-edit-published-comment)
+    ("s" "Set comment status" git-appraise-set-published-comment-status)
+    ("u" "Reopen finding" git-appraise-reopen-finding)]
    ["Move and display"
     ("n" "Next file or hunk" git-appraise-next-item)
     ("p" "Previous file or hunk" git-appraise-previous-item)
@@ -109,6 +123,8 @@ offers local reviews instead of prompting for a URL."
     ("x" "Toggle generated" git-appraise-toggle-exclude-gitattributes-generated)]]
   ["Review"
    ("r" "Submit" git-appraise-transient-dispatch)
+    ("E" "Edit request" git-appraise-edit-request
+     :if git-appraise-review-open-p)
    ("G" "Reload" git-appraise-reload)])
 
 ;;;###autoload (autoload 'git-appraise-magit-dispatch "git-appraise" nil t)
@@ -142,12 +158,16 @@ offers local reviews instead of prompting for a URL."
 (transient-define-prefix git-appraise-transient-api ()
   "Git Appraise."
   [["Review"
-    ("a" "Approve" git-appraise-submit-approve)
-    ("r" "Send needs work" git-appraise-submit-needs-work)
+    ("a" "Approve" git-appraise-submit-approve
+     :if git-appraise-review-open-p)
+    ("r" "Send needs work" git-appraise-submit-needs-work
+     :if git-appraise-review-open-p)
     ("c" "Send comments" git-appraise-submit-comments)
-    ("R" "Reject review" git-appraise-submit-reject)]
+    ("R" "Reject review" git-appraise-submit-reject
+     :if git-appraise-review-open-p)]
    ["Fast track"
-    ("l" "LGTM" git-appraise-submit-lgtm)
+    ("l" "LGTM" git-appraise-submit-lgtm
+     :if git-appraise-review-open-p)
     ("s c" "Single comment" git-appraise-submit-single-top-level-comment)
     ("s C" "Diff comment" git-appraise-submit-single-diff-comment-at-point)]
    ["Discussion"
@@ -162,10 +182,15 @@ offers local reviews instead of prompting for a URL."
     ("G" "Reload" git-appraise-reload)
     ("q" "Quit" transient-quit-one)]
    ["Manage"
-    ("A" "Abandon" git-appraise-abandon-current-review)
+    ("A" "Abandon" git-appraise-abandon-current-review
+     :if git-appraise-review-open-p)
+    ("E" "Edit request" git-appraise-edit-request
+     :if git-appraise-review-open-p)
     ("D" "Remove local review" git-appraise-remove-current-review)
-    ("b" "Rebase" git-appraise-rebase-current-review)
-    ("L" "Land review" git-appraise-land-current-review)
+    ("b" "Rebase" git-appraise-rebase-current-review
+     :if git-appraise-review-open-p)
+    ("L" "Land review" git-appraise-land-current-review
+     :if git-appraise-review-open-p)
     ("p" "Push" git-appraise-push-notes)
     ("P" "Pull" git-appraise-pull-notes)]])
 

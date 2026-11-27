@@ -43,6 +43,8 @@
    (sha           :initform nil)
    (feedback      :initform nil)
    (state         :initform nil)
+   (decision      :initform nil)
+   (lifecycle     :initform nil)
    (url           :initarg :url)
    ;; lightweight in-memory path bookkeeping for comment positioning
    (paths         :initform nil))
@@ -104,6 +106,8 @@
       (oset pullreq raw-infos infos)
       (oset pullreq title .title)
       (oset pullreq state .state)
+      (oset pullreq decision .decision)
+      (oset pullreq lifecycle .lifecycle)
       (oset pullreq base-ref-name .baseRefName)
       (oset pullreq head-ref-name .headRefName)
       (oset pullreq description .bodyHTML)
