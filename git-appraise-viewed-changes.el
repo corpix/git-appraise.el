@@ -24,12 +24,13 @@
 
 (defun git-appraise-viewed-changes--restore-window-margins ()
   "Restore margins this feature added to windows no longer showing a review."
-  (--each (window-list nil 'no-minibuf t)
-    (when-let* ((old (window-parameter it 'git-appraise-viewed-old-margins)))
-      (unless (with-current-buffer (window-buffer it)
-                (derived-mode-p 'git-appraise-mode))
-        (set-window-margins it (car old) (cdr old))
-        (set-window-parameter it 'git-appraise-viewed-old-margins nil)))))
+  (--each (frame-list)
+    (--each (window-list it 'no-minibuf)
+      (when-let* ((old (window-parameter it 'git-appraise-viewed-old-margins)))
+        (unless (with-current-buffer (window-buffer it)
+                  (derived-mode-p 'git-appraise-mode))
+          (set-window-margins it (car old) (cdr old))
+          (set-window-parameter it 'git-appraise-viewed-old-margins nil))))))
 
 (add-hook 'window-configuration-change-hook
           #'git-appraise-viewed-changes--restore-window-margins)

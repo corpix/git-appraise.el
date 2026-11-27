@@ -22,4 +22,23 @@
                   "diff --git a/x b/x\n@@ -1 +1 @@\n+foo\n+foo\n"
                   '(4)))))
 
+;;; req-2026-11-27-008: margin cleanup during redisplay
+;; covers: git-appraise-viewed-changes.el
+;; covers-fn: git-appraise-viewed-changes--restore-window-margins
+;; enforcement: test
+(ert-deftest viewed-changes/req-2026-11-27-008-restore-window-margins ()
+  "WHEN a review window stops showing a review THE SYSTEM SHALL restore its prior margins without a redisplay error."
+  (let* ((window (selected-window))
+         (old (window-margins window)))
+    (unwind-protect
+        (progn
+          (set-window-parameter window 'git-appraise-viewed-old-margins old)
+          (set-window-margins window 1 (cdr old))
+          (git-appraise-viewed-changes--restore-window-margins)
+          (should (equal old (window-margins window)))
+          (should-not (window-parameter
+                       window 'git-appraise-viewed-old-margins)))
+      (set-window-margins window (car old) (cdr old))
+      (set-window-parameter window 'git-appraise-viewed-old-margins nil))))
+
 ;;; git-appraise-viewed-changes-test.el ends here
