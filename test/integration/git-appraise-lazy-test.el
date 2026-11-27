@@ -227,5 +227,4 @@ file is still background-loading or another file shifted the layout."
         (goto-char (point-min))
         (should (search-forward "pkg/agent/bird_spec_builder.go" nil t))))))
 
-(provide 'git-appraise-lazy-test)
 ;;; git-appraise-lazy-test.el ends here

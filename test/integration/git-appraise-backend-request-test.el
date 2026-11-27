@@ -14,33 +14,8 @@
 (defmacro git-appraise-backend-request-test-with-repo (&rest body)
   "Run BODY in a disposable repository with a feature commit but no review."
   (declare (indent 0))
-  `(let* ((directory (make-temp-file "git-appraise-backend-request-test-" t))
-          (default-directory (file-name-as-directory directory))
-          revision)
-     (unwind-protect
-         (progn
-           (git-appraise-test--run
-            directory "git" "init" "-q" "-b" "master")
-           (git-appraise-test--run
-            directory "git" "config" "user.name" "Tester")
-           (git-appraise-test--run
-            directory "git" "config" "user.email" "tester@example.com")
-           (with-temp-file (expand-file-name "example.txt" directory)
-             (insert "first\nsecond\n"))
-           (git-appraise-test--run
-            directory "git" "add" "example.txt")
-           (git-appraise-test--run
-            directory "git" "commit" "-qm" "base")
-           (git-appraise-test--run
-            directory "git" "checkout" "-qb" "feature")
-           (with-temp-file (expand-file-name "example.txt" directory)
-             (insert "first\nchanged\nthird\n"))
-           (git-appraise-test--run
-            directory "git" "commit" "-qam" "change")
-           (setq revision (git-appraise-test--run
-                           directory "git" "rev-parse" "HEAD"))
-           ,@body)
-       (delete-directory directory t))))
+  `(git-appraise-test--with-feature-repo "git-appraise-backend-request-test-"
+     ,@body))
 
 (defun git-appraise-backend-request-test--description (directory)
   "Return the request description of the single review in DIRECTORY."

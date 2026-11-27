@@ -10,28 +10,14 @@
 (require 'git-appraise)
 (require 'git-appraise-test-helpers)
 
-(defmacro git-appraise-active-dev-e2e-test-with-repo (&rest body)
-  "Run BODY in a disposable git-appraise repository with one review."
-  (declare (indent 0))
-  `(git-appraise-test--with-review-repo "git-appraise-active-dev-e2e-"
-     ,@body))
-
-(defun git-appraise-active-dev-e2e-test--open-and-render (revision)
-  "Open REVISION and render it fully."
-  (let ((git-appraise-history-enabled nil))
-    (git-appraise-backend-open revision)
-    (let ((git-appraise-section-full-refresh? t))
-      (git-appraise--build-buffer))
-    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))))
-
 ;;; req-2026-11-24-129: local draft survives head change refresh
 ;; covers: git-appraise-backend.el git-appraise-comment-draft.el
 ;; covers-fn: git-appraise-backend-refresh, git-appraise-comment-handler-commit
 ;; enforcement: test
 (ert-deftest git-appraise-active-dev-e2e/req-2026-11-24-129-draft-survives-head-change ()
   "WHEN new commits appear during review THE SYSTEM SHALL preserve unsent local drafts across refresh."
-  (git-appraise-active-dev-e2e-test-with-repo
-    (git-appraise-active-dev-e2e-test--open-and-render revision)
+  (git-appraise-test--with-review-repo "git-appraise-active-dev-e2e-"
+    (git-appraise-test--open-and-render revision)
     (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
            (git-appraise-section-full-refresh? nil))
       (with-current-buffer buf
@@ -69,8 +55,8 @@
 ;; enforcement: test
 (ert-deftest git-appraise-active-dev-e2e/req-2026-11-24-130-send-remaps-after-head-change ()
   "WHEN a reviewer sends a line comment after new commits appear THE SYSTEM SHALL retain the draft until its location is checked."
-  (git-appraise-active-dev-e2e-test-with-repo
-    (git-appraise-active-dev-e2e-test--open-and-render revision)
+  (git-appraise-test--with-review-repo "git-appraise-active-dev-e2e-"
+    (git-appraise-test--open-and-render revision)
     (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
            (pr (git-appraise-db-get-pullreq)))
       (with-current-buffer buf
@@ -101,8 +87,8 @@
 ;; enforcement: test
 (ert-deftest git-appraise-active-dev-e2e/req-2026-11-25-067-integration-keeps-draft ()
   "WHEN the target branch incorporates a review THE SYSTEM SHALL keep an old inline draft for re-anchoring."
-  (git-appraise-active-dev-e2e-test-with-repo
-    (git-appraise-active-dev-e2e-test--open-and-render revision)
+  (git-appraise-test--with-review-repo "git-appraise-active-dev-e2e-"
+    (git-appraise-test--open-and-render revision)
     (let ((pr (git-appraise-db-get-pullreq))
           (comment (git-appraise-local-comment-section
                     :state "LOCAL COMMENT" :author "Tester"
@@ -125,8 +111,8 @@
 ;; enforcement: test
 (ert-deftest git-appraise-active-dev-e2e/req-2026-11-24-131-file-draft-visible-after-head-change ()
   "WHEN new commits appear and a file draft exists THE SYSTEM SHALL keep the draft visible after refresh."
-  (git-appraise-active-dev-e2e-test-with-repo
-    (git-appraise-active-dev-e2e-test--open-and-render revision)
+  (git-appraise-test--with-review-repo "git-appraise-active-dev-e2e-"
+    (git-appraise-test--open-and-render revision)
     (let* ((buf (get-buffer (git-appraise-pr-buffer-name)))
            (git-appraise-section-full-refresh? nil))
       (with-current-buffer buf
@@ -152,5 +138,4 @@
         (goto-char (point-min))
         (should (search-forward "file draft survives commits" nil t))))))
 
-(provide 'git-appraise-active-dev-e2e-test)
 ;;; git-appraise-active-dev-e2e-test.el ends here

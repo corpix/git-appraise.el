@@ -104,5 +104,4 @@ THE SYSTEM SHALL keep generated and vendored files in the review diff."
          (should (string-match-p "vendor/lib.go" reordered))
          (should (string-match-p "api.pb.go" reordered)))))))
 
-(provide 'git-appraise-gitattributes-test)
 ;;; git-appraise-gitattributes-test.el ends here

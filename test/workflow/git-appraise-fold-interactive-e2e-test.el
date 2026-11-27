@@ -10,6 +10,7 @@
 (require 'cl-lib)
 (require 'git-appraise)
 (require 'git-appraise-test-helpers)
+(require 'git-appraise-test-viewed-fixture)
 
 (defun git-appraise-fold-interactive-e2e-test--build (directory revision)
   "Render REVISION in DIRECTORY and drain lazy work."
@@ -317,5 +318,4 @@ WHEN a reviewer marks an unloaded file viewed THE SYSTEM SHALL mark, fold and ad
                     (line-beginning-position) (line-end-position))))))
       (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name))))))
 
-(provide 'git-appraise-fold-interactive-e2e-test)
 ;;; git-appraise-fold-interactive-e2e-test.el ends here

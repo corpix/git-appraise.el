@@ -6,11 +6,13 @@
 ;;
 ;; Loads every test file in this directory and runs all ERT tests.
 
-(let ((default-directory
-       (file-name-directory (or load-file-name buffer-file-name))))
-  ;; repository root first, so we test the checkout, not an installed copy
-  (add-to-list 'load-path (expand-file-name ".."))
-  (add-to-list 'load-path default-directory))
+(defvar git-appraise-test-root
+  (file-name-directory (or load-file-name buffer-file-name))
+  "Absolute path to the test suite root.")
+
+;; The checkout and shared support must be available before any test loads.
+(add-to-list 'load-path (expand-file-name ".." git-appraise-test-root))
+(add-to-list 'load-path (expand-file-name "support" git-appraise-test-root))
 
 ;; fail fast if any dependency is missing
 (require 'git-appraise)
@@ -27,10 +29,11 @@
 ;; which binds the defcustom t around its render.
 (setq-default git-appraise-analysis-deferred? nil)
 
-(dolist (file (directory-files
-               (file-name-directory (or load-file-name buffer-file-name))
-               t "-test\\.el\\'"))
-  (load file nil t))
+(dolist (layer '("unit" "integration" "workflow"))
+  (dolist (file (directory-files
+                 (expand-file-name layer git-appraise-test-root)
+                 t "-test\\.el\\'"))
+    (load file nil t)))
 
 (defun git-appraise-test--print-failure (test result)
   "Print a clean failure report for TEST RESULT."
