@@ -35,6 +35,10 @@
 (ert-deftest review-journey/req-2026-11-27-012-create-and-reopen ()
   "WHEN a reviewer starts in a repository without reviews THE SYSTEM SHALL create and reopen the selected review."
   (git-appraise-test--with-feature-repo "git-appraise-journey-start-"
+    (require 'magit)
+    (should (eq (lookup-key magit-status-mode-map (kbd "R"))
+                'magit-file-rename))
+    (should (transient-get-suffix 'magit-dispatch "R"))
     (let ((answers '("feature" "master" "Journey review" "")))
       (cl-letf (((symbol-function 'y-or-n-p) (lambda (&rest _) t))
                 ((symbol-function 'read-string)
@@ -97,11 +101,28 @@
     (should (string-match-p "First finding"
                             (git-appraise-review-journey-test--text)))
     (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "First finding")
+      (magit-section-show
+       (git-appraise-eldoc--file-section (magit-current-section)))
+      (backward-char)
+      (execute-kbd-macro (kbd "RET")))
+    (with-current-buffer git-appraise-comment-buffer-name
+      (erase-buffer)
+      (insert "Revised finding")
+      (execute-kbd-macro (kbd "C-c C-c")))
+    (should (string-match-p "Revised finding"
+                            (git-appraise-review-journey-test--text)))
+    (should-not (string-match-p "First finding"
+                                (git-appraise-review-journey-test--text)))
+    (should-not (a-get (git-appraise-review-journey-test--show
+                        directory revision) 'comments))
+    (with-current-buffer (git-appraise-pr-buffer-name)
       (execute-kbd-macro (kbd "g")))
     (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
     (kill-buffer (git-appraise-pr-buffer-name))
     (git-appraise-test--open-and-render revision)
-    (should (string-match-p "First finding"
+    (should (string-match-p "Revised finding"
                             (git-appraise-review-journey-test--text)))
     (with-current-buffer (git-appraise-pr-buffer-name)
       (call-interactively #'git-appraise-submit-needs-work))
@@ -109,7 +130,7 @@
                             directory revision) 'comments)))
       (should (= (length comments) 1))
       (should (equal (a-get-in (car comments) '(comment description))
-                     "First finding")))))
+                     "Revised finding")))))
 
 ;;; req-2026-11-27-014: a review round reaches an accepted landing
 ;; covers: git-appraise-actions.el git-appraise-comment.el git-appraise-backend.el
