@@ -43,6 +43,8 @@ just compile       # byte-compile package files
 just test          # batch ERT suite
 just bench         # 200-file viewed-action timing
 just profile       # CPU and memory profile in ignored tmp/performance/
+just bench-submit  # 200-file review-submission timing
+just profile-submit # submission CPU and memory profile
 ```
 
 - Run `check-parens` in `emacs-lisp-mode` on each changed Elisp file before
@@ -55,7 +57,8 @@ just profile       # CPU and memory profile in ignored tmp/performance/
 - Set `native-comp-jit-compilation` to nil as the first batch probe eval,
   and use the full package load path. Keep probes disposable and bounded.
 - Run the focused tests, then the full suite before committing. Run `bench`
-  and `profile` when changing render or bulk-action work.
+  and `profile` when changing render or bulk-action work; run `bench-submit`
+  and `profile-submit` when changing submission or discussion refresh.
 - Respect the user's live-session constraints. If live probing is authorized,
   load each touched file rather than using `require`, remove defuns that no
   longer exist, and check a fresh render plus re-render stability. Do not
@@ -75,6 +78,9 @@ just profile       # CPU and memory profile in ignored tmp/performance/
 - Asynchronous renders need a new-render marker, not a poll that can match
   old buffer content. Check section visibility through overlays, not the
   `hidden` slot alone.
+- Cover large-review submission with a finding whose file has left the diff.
+  Check that the finding stays visible in Discussion and that resolution and
+  approval keep the cursor on the active comment.
 - Use absolute fixture paths and deterministic commit dates when test
   expectations depend on time or commit order. `tabulated-list` entries are
   `(list ID VECTOR)`; `header-line-format` is not in `buffer-string`.
@@ -91,7 +97,9 @@ just profile       # CPU and memory profile in ignored tmp/performance/
   shared values first. `apply` requires a list as its final argument.
 - `magit-wash-sequence` stops when a washer returns nil. Magit section
   accessors use `oref`; `magit-map-sections` collects through side effects.
-  `magit-insert-heading` may change point and append a child count.
+  Use the section tree to collect staged items instead of scanning every
+  rendered line. `magit-insert-heading` may change point and append a child
+  count.
 - Magit section folding needs a heading, a hidden section spec, and
   `git-appraise-section--hide-if-hidden` on every render. Keep Magit's
   section identity and keymap properties when editing headings in place.
@@ -102,7 +110,9 @@ just profile       # CPU and memory profile in ignored tmp/performance/
 - Keep full-review reloads out of comment-only actions when an in-place
   update suffices. Preserve point and window position unless an action
   explicitly navigates. Test both rendered state and cursor location after
-  interactive actions.
+  interactive actions. When replacing Discussion, preserve child group folds.
+  Anchor a published-comment cursor to its stable ID; preserve other positions
+  with a marker.
 - A published comment edit appends a discussion event with `original` set
   to the stable root hash. A reply resolving a finding uses native `-lgtm`;
   a needs-work reply can reopen it. Requests and discussions live in separate
