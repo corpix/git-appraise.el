@@ -46,6 +46,14 @@ bench:
 profile:
     GIT_APPRAISE_PROFILE=1 {{emacs}} -Q --batch {{load_path}} -l test/performance/viewed.el
 
+# Time a needs-work submission on a disposable 200-file review.
+bench-submit:
+    {{emacs}} -Q --batch {{load_path}} -l test/performance/submit.el
+
+# Capture CPU and memory profiles for large-review submission.
+profile-submit:
+    GIT_APPRAISE_PROFILE=1 {{emacs}} -Q --batch {{load_path}} -l test/performance/submit.el
+
 # Compile then test.
 check: compile test
 

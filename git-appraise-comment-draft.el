@@ -131,6 +131,11 @@ untouched; preserve the heading's current fold state."
                (old-beg (copy-marker (oref old start) t))
                (end (copy-marker (oref old end) t))
                (hidden (oref old hidden))
+               (group-folds
+                (--map (cons (oref it value) (oref it hidden))
+                       (--filter (eq (oref it type)
+                                     'git-appraise-conversation-group)
+                                 (oref old children))))
                (git-appraise-db--pullreq-id
                 (or git-appraise-review-buffer-pr-id
                     git-appraise-db--pullreq-id))
@@ -152,6 +157,14 @@ untouched; preserve the heading's current fold state."
                       (setq new (car (last (oref parent children))))
                       (unless (and new (not (eq new old)))
                         (error "Discussion section was not inserted"))
+                      (dolist (child (oref new children))
+                        (when-let* ((fold (and (eq (oref child type)
+                                                   'git-appraise-conversation-group)
+                                              (assoc (oref child value)
+                                                     group-folds))))
+                          (if (cdr fold)
+                              (magit-section-hide child)
+                            (magit-section-show child))))
                       (if hidden
                           (magit-section-hide new)
                         (magit-section-show new))

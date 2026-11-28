@@ -130,6 +130,33 @@ from review infos when available, otherwise from the raw diff text
           (magit-insert-section (git-appraise-state-section row)
             (insert (format "%-17s" (car row)) (cdr row))
             (insert ?\n)))))))
+
+(defun git-appraise-section--update-review-status-in-place (buffer pr)
+  "Update BUFFER's decision and lifecycle rows from PR.
+Return non-nil only when both existing rows were updated."
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t)
+          (updated 0))
+      (save-excursion
+        (dolist (row `(("Decision:" . ,(oref pr decision))
+                       ("Lifecycle:" . ,(oref pr lifecycle))))
+          (goto-char (point-min))
+          (when (and (cdr row)
+                     (re-search-forward
+                      (concat "^" (regexp-quote (car row)) "[[:space:]]*")
+                      nil t))
+            (let* ((beg (point))
+                   (end (line-end-position))
+                   (props (text-properties-at (max (point-min) (1- beg))))
+                   (section (magit-section-at beg)))
+              (delete-region beg end)
+              (goto-char beg)
+              (insert (cdr row))
+              (add-text-properties beg (point) props)
+              (when (git-appraise-state-section-p section)
+                (oset section value row))
+              (cl-incf updated)))))
+      (= updated 2))))
 (defclass git-appraise-ref-section (magit-section)
   ((base   :initarg :base
            :type (or null string))

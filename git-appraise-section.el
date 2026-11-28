@@ -380,7 +380,7 @@
 
 (defun git-appraise-section--by-you-heading-regexp ()
   "The heading text a local or reply comment section renders with."
-  "\\(Comment\\|Reply\\) by YOU · \\(DRAFT\\)")
+  "\\[\\(DRAFT\\)\\] YOU")
 
 (defun git-appraise-section--mark-comment-sent-in-place (buff-name section)
   "Mark SECTION's draft heading as sent, in place."
@@ -399,8 +399,8 @@
                          (git-appraise-section--by-you-heading-regexp)
                          lend t)))
               (when hit
-                (let* ((beg (match-beginning 2))
-                       (end (match-end 2))
+                (let* ((beg (match-beginning 1))
+                       (end (match-end 1))
                        (props (text-properties-at beg)))
                   (goto-char end)
                   (insert (apply #'propertize

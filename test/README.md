@@ -37,3 +37,13 @@ text reports and loadable `.prof` files are written to ignored
 `tmp/performance/`. Compare benchmark results on the same machine before and
 after a change. The regular ERT suite checks bounded full-review work and
 correct state for 200 files; elapsed time is diagnostic, not a CI threshold.
+
+## Large review submission
+
+`just bench-submit` times a needs-work submission on a disposable 200-file
+review with a historical finding. It reports the metadata refresh and section
+update phases, so an accidental full diff reload is visible in the call counts.
+`just profile-submit` runs the same flow with CPU and memory profiling and
+writes `submit-*.txt` and `submit-*.prof` to ignored `tmp/performance/`.
+The workflow tests also cover needs-work feedback, resolving findings, approval,
+and cursor location after each action.

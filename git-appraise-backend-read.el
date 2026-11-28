@@ -623,7 +623,7 @@ reported send failure."
                       (current (git-appraise-db-get-pullreq)))
             (setf (alist-get 'commits (car normalized))
                   (a-get (oref current raw-infos) 'commits))
-            (oset current raw-infos (car normalized))
+            (git-appraise-db--pullreq-raw-infos-update (car normalized))
             (oset current native-review
                   (git-appraise-backend--native-review directory review head))
             (oset current raw-comments
