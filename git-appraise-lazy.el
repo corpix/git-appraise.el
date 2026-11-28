@@ -52,7 +52,7 @@
                   (section))
 (declare-function git-appraise--mark-comment-lines "git-appraise-section")
 (declare-function git-appraise-viewed-changes--paint-file "git-appraise-viewed-changes"
-                  (section))
+                  (section &optional focus-changes))
 (declare-function git-appraise-viewed-changes--restore-window-margins
                   "git-appraise-viewed-changes")
 (declare-function git-appraise-utils--log "git-appraise-utils")
@@ -524,7 +524,7 @@ instead, dragging the cursor onto the loaded file's heading."
                  (hash-table-p git-appraise-viewed-changes--targets)
                  (gethash (git-appraise-folding--file-path new-section)
                           git-appraise-viewed-changes--targets))
-        (git-appraise-viewed-changes--paint-file new-section)
+        (git-appraise-viewed-changes--paint-file new-section t)
         (git-appraise-viewed-changes--restore-window-margins))
       (when git-appraise-comment-fringe-markers
         (git-appraise--mark-comment-lines)))

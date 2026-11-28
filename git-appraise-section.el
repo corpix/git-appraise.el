@@ -193,7 +193,7 @@
      (not (or fresh-render? git-appraise-section--just-refetched))))
   (when git-appraise-comment-fringe-markers
     (git-appraise--mark-comment-lines))
-  (git-appraise-viewed-changes--paint))
+  (git-appraise-viewed-changes--paint t))
 
 (defun git-appraise--update-header-line (&rest _)
   "Update sticky header line for the current review buffer."

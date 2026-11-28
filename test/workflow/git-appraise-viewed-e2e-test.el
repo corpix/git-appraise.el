@@ -200,6 +200,52 @@
       (with-current-buffer (git-appraise-pr-buffer-name)
         (should-not (git-appraise-lazy--progress-string))))))
 
+;;; req-2026-11-28-009: focus changed hunks of a viewed file
+;; covers: git-appraise-viewed-changes.el git-appraise-section.el git-appraise-lazy.el
+;; covers-fn: git-appraise-viewed-changes--collapse-unchanged, git-appraise-viewed-changes--paint-file
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-28-009-collapse-unchanged-hunks ()
+  "WHEN a viewed file changes THE SYSTEM SHALL show changed hunks and collapse unchanged hunks with headings available."
+  (let ((git-appraise-lazy-enabled t))
+    (git-appraise-viewed-e2e-test--with-review
+      (git-appraise-start revision)
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (search-forward "big.txt")
+        (beginning-of-line)
+        (execute-kbd-macro (kbd "V")))
+      (with-temp-file (expand-file-name "big.txt" directory)
+        (insert "l1\nL2-new\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nl12\n"))
+      (git-appraise-test--run directory "git" "commit" "-qam" "change first hunk")
+      (kill-buffer (git-appraise-pr-buffer-name))
+      (git-appraise-start revision)
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (should (re-search-forward "^modified[ \t]+.*big\\.txt.*\\[CHANGED\\]" nil t))
+        (goto-char (point-min))
+        (should (search-forward "+L2-new" nil t))
+        (should-not (invisible-p (line-beginning-position)))
+        (goto-char (point-min))
+        (should (search-forward "+L10" nil t))
+        (let ((unchanged (magit-current-section)))
+          (should (magit-hunk-section-p unchanged))
+          (should (invisible-p (line-beginning-position)))
+          (should-not (invisible-p (oref unchanged start)))
+          (goto-char (oref unchanged start))
+          (execute-kbd-macro (kbd "TAB"))
+          (goto-char (point-min))
+          (search-forward "+L10")
+          (should-not (invisible-p (line-beginning-position)))
+          (goto-char (point-min))
+          (search-forward "other.txt")
+          (beginning-of-line)
+          (git-appraise-viewed-toggle-file)
+          (goto-char (point-min))
+          (search-forward "+L10")
+          (should-not (invisible-p (line-beginning-position))))))))
+
 ;;; req-2026-11-26-003: navigation skips fully viewed files
 ;; covers: git-appraise-actions.el git-appraise.el
 ;; covers-fn: git-appraise-next-unviewed-file

@@ -163,18 +163,28 @@ the font and display; customize the face to change its color."
 (defun git-appraise-viewed-changes--show-marked (sections)
   "Reveal file and hunk SECTIONS containing changed diff lines."
   (save-excursion
-    (dolist (section (delete-dups (nreverse sections)))
+    (dolist (section (delete-dups (copy-sequence sections)))
       (let ((file (oref section parent)))
         (when (and (magit-file-section-p file) (oref file hidden))
           (magit-section-show file))
         (when (oref section hidden)
           (magit-section-show section))))))
 
-(defun git-appraise-viewed-changes--paint-file (section)
-  "Paint changed lines in the fully washed file SECTION."
+(defun git-appraise-viewed-changes--collapse-unchanged (file marked)
+  "Collapse hunks in FILE absent from MARKED, retaining their headings."
+  (unless (oref file hidden)
+    (--each (oref file children)
+      (when (and (magit-hunk-section-p it)
+                 (not (memq it marked))
+                 (not (oref it hidden)))
+        (magit-section-hide it)))))
+
+(defun git-appraise-viewed-changes--paint-file (section &optional focus-changes)
+  "Paint changed lines in file SECTION; with FOCUS-CHANGES, fold others."
   (let* ((path (git-appraise-viewed--file-path section))
          (targets (copy-sequence
                    (gethash path git-appraise-viewed-changes--targets)))
+         (changed? targets)
          (limit (oref section end))
          marked-sections)
     (when targets
@@ -194,10 +204,13 @@ the font and display; customize the face to change its color."
                       (push hunk marked-sections)))
                   (pop targets)))
               (forward-line 1))))))
-    (git-appraise-viewed-changes--show-marked marked-sections)))
+    (when (and focus-changes changed?)
+      (git-appraise-viewed-changes--show-marked marked-sections)
+      (git-appraise-viewed-changes--collapse-unchanged
+       section marked-sections))))
 
-(defun git-appraise-viewed-changes--paint ()
-  "Paint prepared changed lines in the current review buffer."
+(defun git-appraise-viewed-changes--paint (&optional focus-changes)
+  "Paint changed lines, focusing their hunks when FOCUS-CHANGES."
   (--each (overlays-in (point-min) (point-max))
     (when (overlay-get it 'git-appraise-viewed-change-bar)
       (delete-overlay it)))
@@ -205,7 +218,7 @@ the font and display; customize the face to change its color."
     (magit-map-sections
      (lambda (section)
        (when (magit-file-section-p section)
-         (git-appraise-viewed-changes--paint-file section)))))
+         (git-appraise-viewed-changes--paint-file section focus-changes)))))
   (git-appraise-viewed-changes--restore-window-margins))
 
 (provide 'git-appraise-viewed-changes)
