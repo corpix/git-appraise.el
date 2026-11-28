@@ -14,7 +14,8 @@
 (declare-function git-appraise--patch-line-p "git-appraise-section")
 
 (defface git-appraise-viewed-change-bar
-  '((t :inherit warning :weight bold))
+  '((((class color)) :foreground "DarkOrange" :weight bold)
+    (t :inherit warning :weight bold))
   "Margin bar for lines changed since a file was viewed."
   :group 'git-appraise)
 
@@ -23,14 +24,23 @@
 (put 'git-appraise-viewed-changes--targets 'permanent-local t)
 
 (defun git-appraise-viewed-changes--restore-window-margins ()
-  "Restore margins this feature added to windows no longer showing a review."
+  "Keep the margin cue available in windows showing changed reviews."
   (--each (frame-list)
     (--each (window-list it 'no-minibuf)
-      (when-let* ((old (window-parameter it 'git-appraise-viewed-old-margins)))
-        (unless (with-current-buffer (window-buffer it)
-                  (derived-mode-p 'git-appraise-mode))
+      (let* ((old (window-parameter it 'git-appraise-viewed-old-margins))
+             (changed (with-current-buffer (window-buffer it)
+                        (and (derived-mode-p 'git-appraise-mode)
+                             (hash-table-p git-appraise-viewed-changes--targets)
+                             (> (hash-table-count
+                                 git-appraise-viewed-changes--targets) 0)))))
+        (cond
+         ((and changed (< (or (car (window-margins it)) 0) 1))
+          (set-window-parameter it 'git-appraise-viewed-old-margins
+                                (window-margins it))
+          (set-window-margins it 1 (cdr (window-margins it))))
+         ((and old (not changed))
           (set-window-margins it (car old) (cdr old))
-          (set-window-parameter it 'git-appraise-viewed-old-margins nil))))))
+          (set-window-parameter it 'git-appraise-viewed-old-margins nil)))))))
 
 (add-hook 'window-configuration-change-hook
           #'git-appraise-viewed-changes--restore-window-margins)
@@ -164,11 +174,7 @@
                           (line-beginning-position))
                          (pop targets)))
                      (forward-line 1))))))))))
-    (--each (get-buffer-window-list (current-buffer) nil t)
-      (let ((margins (window-margins it)))
-        (when (< (or (car margins) 0) 1)
-          (set-window-parameter it 'git-appraise-viewed-old-margins margins)
-          (set-window-margins it 1 (cdr margins)))))))
+    (git-appraise-viewed-changes--restore-window-margins)))
 
 (provide 'git-appraise-viewed-changes)
 ;;; git-appraise-viewed-changes.el ends here

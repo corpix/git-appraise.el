@@ -50,6 +50,50 @@
                              (overlay-get ov 'git-appraise-viewed-change-bar))
                            (overlays-in (point-min) (point-max)))))))
 
+;;; req-2026-11-28-003: changed line cue in a newly opened review
+;; covers: git-appraise-viewed-changes.el git-appraise-section.el
+;; covers-fn: git-appraise-viewed-changes--paint, git-appraise-viewed-changes--restore-window-margins
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-28-003-changed-line-visible-on-reopen ()
+  "WHEN a changed review is reopened THE SYSTEM SHALL show the changed-line cue in the left margin."
+  (let* ((window (selected-window))
+         (old-margins (window-margins window)))
+    (unwind-protect
+        (progn
+          (set-window-margins window 0 (cdr old-margins))
+          (git-appraise-viewed-e2e-test--with-review
+            (git-appraise-viewed-e2e-test--build directory revision)
+            (with-current-buffer (git-appraise-pr-buffer-name)
+              (goto-char (point-min))
+              (search-forward "big.txt")
+              (beginning-of-line)
+              (git-appraise-viewed-toggle-file))
+            (with-temp-file (expand-file-name "big.txt" directory)
+              (insert "l1\nL2-new\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nl12\n"))
+            (git-appraise-test--run directory "git" "commit" "-qam" "change viewed line")
+            (kill-buffer (git-appraise-pr-buffer-name))
+            (set-window-margins window 0 (cdr old-margins))
+            (git-appraise-viewed-e2e-test--build directory revision)
+            (with-current-buffer (git-appraise-pr-buffer-name)
+              (goto-char (point-min))
+              (should (search-forward "+L2-new" nil t))
+              (let* ((line (line-beginning-position))
+                     (bar (--first (overlay-get it 'git-appraise-viewed-change-bar)
+                                    (overlays-at line)))
+                     (display (and bar (get-text-property
+                                        0 'display (overlay-get bar 'before-string)))))
+                (should bar)
+                (should (eq (caar display) 'margin))
+                (with-temp-buffer
+                  (set-window-buffer window (current-buffer))
+                  (run-hooks 'window-configuration-change-hook)
+                  (should (= (or (car (window-margins window)) 0) 0))
+                  (set-window-buffer window (get-buffer (git-appraise-pr-buffer-name)))
+                  (run-hooks 'window-configuration-change-hook))
+                (should (>= (or (car (window-margins window)) 0) 1))))))
+      (set-window-margins window (car old-margins) (cdr old-margins))
+      (set-window-parameter window 'git-appraise-viewed-old-margins nil))))
+
 ;;; req-2026-11-26-003: navigation skips fully viewed files
 ;; covers: git-appraise-actions.el git-appraise.el
 ;; covers-fn: git-appraise-next-unviewed-file
