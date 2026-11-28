@@ -19,6 +19,19 @@
   "Margin bar for lines changed since a file was viewed."
   :group 'git-appraise)
 
+(defcustom git-appraise-viewed-change-bar-glyph "▌"
+  "Glyph used for the left margin bar beside changed diff lines.
+The default fills half a character cell.  Its pixel width depends on
+the font and display; customize the face to change its color."
+  :group 'git-appraise
+  :type '(choice (const :tag "Thin (1/8 cell)" "▏")
+                 (const :tag "Quarter cell" "▎")
+                 (const :tag "Three-eighths cell" "▍")
+                 (const :tag "Half cell" "▌")
+                 (const :tag "Five-eighths cell" "▋")
+                 (const :tag "Three-quarter cell" "▊")
+                 (const :tag "Full cell" "█")))
+
 (defvar-local git-appraise-viewed-changes--targets nil
   "Hash of path to changed current patch lines, prepared before wash.")
 (put 'git-appraise-viewed-changes--targets 'permanent-local t)
@@ -144,7 +157,7 @@
     (overlay-put ov 'before-string
                  (propertize " " 'display
                              `((margin left-margin)
-                               ,(propertize "▏" 'face
+                               ,(propertize git-appraise-viewed-change-bar-glyph 'face
                                             'git-appraise-viewed-change-bar))))))
 
 (defun git-appraise-viewed-changes--show-marked (sections)

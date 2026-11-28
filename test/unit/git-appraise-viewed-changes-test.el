@@ -41,4 +41,26 @@
       (set-window-margins window (car old) (cdr old))
       (set-window-parameter window 'git-appraise-viewed-old-margins nil))))
 
+;;; req-2026-11-28-005: configurable changed-line bar thickness
+;; covers: git-appraise-viewed-changes.el
+;; covers-fn: git-appraise-viewed-changes--mark
+;; enforcement: test
+(ert-deftest viewed-changes/req-2026-11-28-005-bar-thickness ()
+  "WHEN a reviewer selects a bar thickness THE SYSTEM SHALL draw changed-line cues with that thickness."
+  (should (equal git-appraise-viewed-change-bar-glyph "▌"))
+  (with-temp-buffer
+    (insert "changed\n")
+    (dolist (glyph '("▌" "▏"))
+      (let ((git-appraise-viewed-change-bar-glyph glyph))
+        (git-appraise-viewed-changes--mark (point-min))
+        (let* ((bar (cl-find-if
+                     (lambda (ov)
+                       (overlay-get ov 'git-appraise-viewed-change-bar))
+                     (overlays-at (point-min))))
+               (display (get-text-property
+                         0 'display (overlay-get bar 'before-string))))
+          (should (eq (caar display) 'margin))
+          (should (equal (substring-no-properties (cadr display))
+                         glyph)))))))
+
 ;;; git-appraise-viewed-changes-test.el ends here
