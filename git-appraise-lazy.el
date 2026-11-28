@@ -84,6 +84,26 @@ regardless of this value."
   "Placeholder sections still to load, in wash order.")
 (put 'git-appraise-lazy--queue 'permanent-local t)
 
+(defvar-local git-appraise-lazy--progress-total nil
+  "Number of files in the active lazy load, or nil when idle.")
+(put 'git-appraise-lazy--progress-total 'permanent-local t)
+
+(defun git-appraise-lazy--progress-string ()
+  "Return the review's mode-line loading progress, or nil when idle."
+  (when (and (integerp git-appraise-lazy--progress-total)
+             (> git-appraise-lazy--progress-total 0))
+    (format " Diff %d/%d"
+            (- git-appraise-lazy--progress-total
+               (length git-appraise-lazy--queue))
+            git-appraise-lazy--progress-total)))
+
+(defun git-appraise-lazy--install-progress ()
+  "Add the lazy load indicator to this review buffer's mode line."
+  (let ((entry '(:eval (git-appraise-lazy--progress-string))))
+    (unless (member entry mode-line-misc-info)
+      (setq-local mode-line-misc-info
+                  (append mode-line-misc-info (list entry))))))
+
 (defvar-local git-appraise-lazy--commit-focus? nil
   "Whether the render that built the placeholders was commit-focus.")
 (put 'git-appraise-lazy--commit-focus? 'permanent-local t)
@@ -144,7 +164,8 @@ content.  The drain moves them to the wash's true end.")
 (defun git-appraise-lazy--invalidate ()
   "Drop every pending lazy chunk for the current buffer."
   (setq git-appraise-lazy--epoch (cons 'git-appraise-lazy nil)
-        git-appraise-lazy--queue nil)
+        git-appraise-lazy--queue nil
+        git-appraise-lazy--progress-total nil)
   ;; the wash stepper shares the epoch: drop its state too, or a
   ;; stale marker keeps a drain loop waiting forever
   (when (markerp git-appraise-lazy--wash-pos)
@@ -152,7 +173,8 @@ content.  The drain moves them to the wash's true end.")
   (when (markerp git-appraise-lazy--wash-limit)
     (set-marker git-appraise-lazy--wash-limit nil))
   (setq git-appraise-lazy--wash-pos nil
-        git-appraise-lazy--wash-limit nil))
+        git-appraise-lazy--wash-limit nil)
+  (force-mode-line-update))
 
 (defun git-appraise-lazy--render-call (origin &rest args)
   "ORIGIN is `git-appraise-render--call'; ARGS its arguments.
@@ -494,6 +516,9 @@ instead, dragging the cursor onto the loaded file's heading."
       (set-marker parked nil))
     (when (and new-section
                (not (git-appraise-lazy-placeholder-section-p new-section)))
+      (setq git-appraise-lazy--queue
+            (delq section git-appraise-lazy--queue))
+      (force-mode-line-update)
       (git-appraise-section--fold-hunks new-section nil)
       (when (and (boundp 'git-appraise-viewed-changes--targets)
                  (hash-table-p git-appraise-viewed-changes--targets)
@@ -555,7 +580,9 @@ render or the reviewer."
                    git-appraise-lazy--commit-focus?)))
             (error
              (git-appraise-utils--log
-              "lazy-drain" (error-message-string err)))))))))
+              "lazy-drain" (error-message-string err))))
+          (setq git-appraise-lazy--progress-total nil)
+          (force-mode-line-update))))))
 
 (defun git-appraise-lazy--schedule (commit-focus? fresh-render?)
   "Create file placeholders, then queue their deferred expansion.
@@ -584,6 +611,9 @@ even while the hunks are still loading."
       (error "Code review stopped before the end of the diff"))
     (git-appraise-lazy--insert-placeholder))
   (setq git-appraise-lazy--queue (nreverse git-appraise-lazy--queue))
+  (setq git-appraise-lazy--progress-total (length git-appraise-lazy--queue))
+  (git-appraise-lazy--install-progress)
+  (force-mode-line-update)
   (let ((buffer (current-buffer))
         (epoch git-appraise-lazy--epoch))
     (deferred:nextc (deferred:next)

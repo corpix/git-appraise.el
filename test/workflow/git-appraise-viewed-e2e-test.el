@@ -175,6 +175,31 @@
                           (overlays-at line))))
         (should (> (length git-appraise-lazy--queue) 1))))))
 
+;;; req-2026-11-28-008: lazy review progress in the mode line
+;; covers: git-appraise-lazy.el
+;; covers-fn: git-appraise-lazy--schedule, git-appraise-lazy--expand-at, git-appraise-lazy--expand-step
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-28-008-mode-line-progress ()
+  "WHEN review files load in the background THE SYSTEM SHALL show their progress in the mode line until loading finishes."
+  (let ((git-appraise-lazy-enabled t))
+    (git-appraise-viewed-e2e-test--with-review
+      (git-appraise-start revision)
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should (member 'mode-line-misc-info mode-line-format))
+        (should (member '(:eval (git-appraise-lazy--progress-string))
+                        mode-line-misc-info))
+        (should (equal (git-appraise-lazy--progress-string) " Diff 0/3"))
+        (should (git-appraise-lazy--load-next))
+        (should (equal (git-appraise-lazy--progress-string) " Diff 1/3"))
+        (git-appraise-reload)
+        (should (equal (git-appraise-lazy--progress-string) " Diff 0/3"))
+        (should (= (--count (equal it '(:eval (git-appraise-lazy--progress-string)))
+                            mode-line-misc-info)
+                   1)))
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should-not (git-appraise-lazy--progress-string))))))
+
 ;;; req-2026-11-26-003: navigation skips fully viewed files
 ;; covers: git-appraise-actions.el git-appraise.el
 ;; covers-fn: git-appraise-next-unviewed-file
