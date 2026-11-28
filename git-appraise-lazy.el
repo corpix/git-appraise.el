@@ -51,6 +51,10 @@
 (declare-function git-appraise-folding--file-path "git-appraise-folding"
                   (section))
 (declare-function git-appraise--mark-comment-lines "git-appraise-section")
+(declare-function git-appraise-viewed-changes--paint-file "git-appraise-viewed-changes"
+                  (section))
+(declare-function git-appraise-viewed-changes--restore-window-margins
+                  "git-appraise-viewed-changes")
 (declare-function git-appraise-utils--log "git-appraise-utils")
 
 (defcustom git-appraise-lazy-enabled t
@@ -132,6 +136,7 @@ content.  The drain moves them to the wash's true end.")
   "Dynamic (non-buffer-local) wash limit for `--block-end' during a step.")
 
 (defvar git-appraise-section--just-refetched)
+(defvar git-appraise-viewed-changes--targets)
 
 (defclass git-appraise-lazy-placeholder-section (magit-section)
   ())
@@ -490,6 +495,12 @@ instead, dragging the cursor onto the loaded file's heading."
     (when (and new-section
                (not (git-appraise-lazy-placeholder-section-p new-section)))
       (git-appraise-section--fold-hunks new-section nil)
+      (when (and (boundp 'git-appraise-viewed-changes--targets)
+                 (hash-table-p git-appraise-viewed-changes--targets)
+                 (gethash (git-appraise-folding--file-path new-section)
+                          git-appraise-viewed-changes--targets))
+        (git-appraise-viewed-changes--paint-file new-section)
+        (git-appraise-viewed-changes--restore-window-margins))
       (when git-appraise-comment-fringe-markers
         (git-appraise--mark-comment-lines)))
     (git-appraise-lazy--settle-position new-section)

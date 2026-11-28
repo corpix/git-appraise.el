@@ -140,6 +140,41 @@
       (should (>= (or (car (window-margins
                            (get-buffer-window (current-buffer)))) 0) 1)))))
 
+;;; req-2026-11-28-006: paint changed lines when their file loads
+;; covers: git-appraise-lazy.el git-appraise-viewed-changes.el
+;; covers-fn: git-appraise-lazy--expand-at, git-appraise-viewed-changes--paint-file
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-28-006-bar-before-lazy-drain ()
+  "WHEN a changed file finishes loading THE SYSTEM SHALL show its margin bar before other files finish loading."
+  (let ((git-appraise-lazy-enabled t))
+    (git-appraise-viewed-e2e-test--with-review
+      (git-appraise-start revision)
+      (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (goto-char (point-min))
+        (search-forward "big.txt")
+        (beginning-of-line)
+        (execute-kbd-macro (kbd "V")))
+      (with-temp-file (expand-file-name "big.txt" directory)
+        (insert "l1\nL2-new\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10\nl11\nl12\n"))
+      (git-appraise-test--run directory "git" "commit" "-qam" "change viewed line")
+      (kill-buffer (git-appraise-pr-buffer-name))
+      (git-appraise-start revision)
+      (with-current-buffer (git-appraise-pr-buffer-name)
+        (should (> (length git-appraise-lazy--queue) 1))
+        (let ((placeholder (--first (equal (plist-get (oref it value) :path)
+                                           "big.txt")
+                                    git-appraise-lazy--queue)))
+          (should placeholder)
+          (should (git-appraise-lazy--expand-at placeholder)))
+        (goto-char (point-min))
+        (should (search-forward "+L2-new" nil t))
+        (let ((line (line-beginning-position)))
+          (should-not (invisible-p line))
+          (should (--any? (overlay-get it 'git-appraise-viewed-change-bar)
+                          (overlays-at line))))
+        (should (> (length git-appraise-lazy--queue) 1))))))
+
 ;;; req-2026-11-26-003: navigation skips fully viewed files
 ;; covers: git-appraise-actions.el git-appraise.el
 ;; covers-fn: git-appraise-next-unviewed-file
