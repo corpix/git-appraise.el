@@ -1,10 +1,9 @@
 - [x] Show full, foldable review conversations with links to diff comments and persistent fold choices.
 - [x] Cover `G` after a branch commit with an end-to-end test; clear stale Magit section UI references after a render.
 - [x] Resolve findings through git-appraise's native `-lgtm` reply, so the status travels with published notes.
-- [x] Edit or delete drafts locally; explain that published comments are append-only and can be corrected by reply.
-- [x] Highlight diff lines changed since a file was last fully viewed with an orange left-margin bar.
+- [x] Edit or delete drafts locally; keep published edits as append-only note events.
+- [x] Highlight diff lines changed since a file was last fully viewed in the margin.
 - [x] Jump to the next unviewed file with `N`.
 - [x] Stop in-place viewed-column updates from deleting the start of a file heading.
-- [x] Compare the git-appraise workflow with the local magit-hutch checkout; see docs/review-workflow-choice.md.
 
 Future: an in-review agent action. Review storage remains git-appraise.
