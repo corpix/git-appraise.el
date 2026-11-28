@@ -60,12 +60,12 @@
   :group 'git-appraise
   :type 'integer)
 (defvar-local git-appraise-focus-mode nil
-  "When non-nil, files auto-flagged as noise are hidden.
-See `git-appraise-diff-noise-rules' and
+  "When non-nil, file types configured as noise are hidden.
+See `git-appraise-file-types' and
 `git-appraise-toggle-focus-mode'.")
 (put 'git-appraise-focus-mode 'permanent-local t)
 (defvar-local git-appraise-section--file-classifications nil
-  "Hash table path -> plist (:tag :collapse :hide) for the diff.
+  "Hash table path -> plist (:type :tag :face :collapse :hide) for the diff.
 Recomputed by `git-appraise--diff--classify-diff' on every render.
 For internal usage only.")
 ;; permanent-local: the deferred render tail RE-RUNS the mode body

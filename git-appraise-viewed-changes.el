@@ -14,8 +14,8 @@
 (declare-function git-appraise--patch-line-p "git-appraise-section")
 
 (defface git-appraise-viewed-change-bar
-  '((t :foreground "dark orange" :weight bold))
-  "Orange margin bar for lines changed since a file was viewed."
+  '((t :inherit warning :weight bold))
+  "Margin bar for lines changed since a file was viewed."
   :group 'git-appraise)
 
 (defvar-local git-appraise-viewed-changes--targets nil

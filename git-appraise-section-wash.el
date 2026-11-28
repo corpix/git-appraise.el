@@ -41,6 +41,7 @@
 (require 'git-appraise-db)
 (require 'git-appraise-utils)
 (require 'git-appraise-diff)
+(require 'git-appraise-file-types)
 (require 'git-appraise-viewed)
 
 (defcustom git-appraise-show-file-change-summary t
@@ -220,8 +221,14 @@ INFO supplies its classification; LAZY marks a deferred file."
                           'magit-diff-file-heading)))
       (insert (propertize (format "%-10s " status)
                           'font-lock-face heading-face))
-      (insert (propertize (format "%-4s " tag)
-                          'font-lock-face 'git-appraise-diff-tag-face))
+      (insert (propertize
+               (concat tag
+                       (make-string
+                        (max 0 (- (git-appraise-file-types--tag-width)
+                                  (string-width tag))) ?\s)
+                       " ")
+               'font-lock-face (or (plist-get info :face)
+                                   'git-appraise-diff-tag-face)))
       (when git-appraise-show-file-change-summary
         (if (or (> added 0) (> deleted 0))
             (let* ((add-str (format "+%d" added))
@@ -252,7 +259,9 @@ INFO supplies its classification; LAZY marks a deferred file."
                             "")))
         (insert (propertize (format "%-5s" comment-str)
                             'font-lock-face 'git-appraise-dimmed)))
-      (insert (propertize display 'font-lock-face heading-face)))
+      (insert (propertize display 'font-lock-face heading-face
+                          'help-echo (when-let* ((language (plist-get info :language)))
+                                       (format "Linguist language: %s" language)))))
     (add-text-properties beg (point)
                          `(git-appraise-path ,clean-path
                            ,@(when lazy '(git-appraise-lazy t))))
@@ -363,7 +372,12 @@ this is non-nil."
       (when (and missing-paths git-appraise-section--display-all-comments)
         (git-appraise-section-insert-outdated-comment-missing
          clean-path missing-paths git-appraise-section-grouped-comments))
-      (git-appraise-history-insert-for-file clean-path)))))
+      (git-appraise-history-insert-for-file clean-path)
+      (when-let* ((language (plist-get info :language)))
+        (magit-insert-section (git-appraise-file-language language)
+          (insert (propertize (format "Language: %s" language)
+                              'font-lock-face 'git-appraise-file-language-face))
+          (magit-insert-heading)))))))
       (git-appraise-section--hide-if-hidden section)
       section)))
 (defun git-appraise-wash-hunk--comment-line-keys (path-name ch old-line new-line)

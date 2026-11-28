@@ -32,7 +32,8 @@
         (original-foreground (symbol-function 'face-foreground))
         (original-background (symbol-function 'face-background))
         (original-tag (and (fboundp 'svg-lib-tag)
-                           (symbol-function 'svg-lib-tag))))
+                           (symbol-function 'svg-lib-tag)))
+        tag-args)
     (unwind-protect
         (progn
           (fset 'display-graphic-p (lambda (&rest _) t))
@@ -42,11 +43,18 @@
                             (apply original-require feature args))))
           (fset 'face-foreground (lambda (&rest _) "#00aa00"))
           (fset 'face-background (lambda (&rest _) "#ffffff"))
-          (fset 'svg-lib-tag (lambda (label &rest _)
+          (fset 'svg-lib-tag (lambda (label &rest args)
+                              (setq tag-args args)
                               (list :svg-label label)))
-          (should (equal '(:svg-label "LGTM")
-                         (git-appraise-badge--image
-                          "LGTM" 'git-appraise-badge-success-face))))
+          (let ((git-appraise-badge-svg-padding 3)
+                (git-appraise-badge-svg-radius 5)
+                (git-appraise-badge-svg-font-size 17))
+            (should (equal '(:svg-label "LGTM")
+                           (git-appraise-badge--image
+                            "LGTM" 'git-appraise-badge-success-face)))
+            (should (= 3 (plist-get (cdr tag-args) :padding)))
+            (should (= 5 (plist-get (cdr tag-args) :radius)))
+            (should (= 17 (plist-get (cdr tag-args) :font-size)))))
       (fset 'display-graphic-p original-graphic)
       (fset 'image-type-available-p original-available)
       (fset 'require original-require)
@@ -55,5 +63,19 @@
       (if original-tag
           (fset 'svg-lib-tag original-tag)
         (fmakunbound 'svg-lib-tag)))))
+
+(ert-deftest badges/user-styles-override-label-face-and-mode ()
+  "Users can change status labels and faces and force text badges."
+  (let ((git-appraise-badge-styles (copy-tree git-appraise-badge-styles))
+        (git-appraise-badge-style 'text))
+    (setf (plist-get (cdr (assoc "APPROVED" git-appraise-badge-styles)) :label)
+          "OK")
+    (setf (plist-get (cdr (assoc "APPROVED" git-appraise-badge-styles)) :face)
+          'font-lock-keyword-face)
+    (let ((badge (git-appraise-badge "APPROVED")))
+      (should (equal "[OK]" (substring-no-properties badge)))
+      (should (eq 'font-lock-keyword-face
+                  (get-text-property 0 'font-lock-face badge)))
+      (should-not (get-text-property 0 'display badge)))))
 
 ;;; git-appraise-badges-test.el ends here

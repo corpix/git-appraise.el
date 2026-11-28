@@ -61,15 +61,37 @@
   "Face for file classification tags like [DOC] or [WS-ONLY]."
   :group 'git-appraise)
 
+(defface git-appraise-file-type-generated-face
+  '((t :inherit font-lock-warning-face :weight bold))
+  "Face for generated-file tags."
+  :group 'git-appraise)
+(defface git-appraise-file-type-vendored-face
+  '((t :inherit shadow :weight bold))
+  "Face for vendored-file tags."
+  :group 'git-appraise)
+(defface git-appraise-file-type-documentation-face
+  '((t :inherit font-lock-doc-face :weight bold))
+  "Face for documentation-file tags."
+  :group 'git-appraise)
+(defface git-appraise-file-type-test-face
+  '((t :inherit font-lock-function-name-face :weight bold))
+  "Face for test-file tags."
+  :group 'git-appraise)
+(defface git-appraise-file-type-spec-face
+  '((t :inherit font-lock-type-face :weight bold))
+  "Face for specification-file tags."
+  :group 'git-appraise)
+(defface git-appraise-file-type-whitespace-face
+  '((t :inherit shadow :weight bold))
+  "Face for whitespace-only-file tags."
+  :group 'git-appraise)
+(defface git-appraise-file-language-face
+  '((t :inherit magit-section-secondary-heading))
+  "Face for an explicit Linguist language in expanded file details."
+  :group 'git-appraise)
+
 (defface git-appraise-thread-face
-  `((((class color) (background light))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "SlateGrey"
-     :weight bold)
-    (((class color) (background  dark))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "SlateGrey"
-     :weight bold))
+  '((t :inherit magit-section-secondary-heading :weight bold))
   "Face for threads."
   :group 'git-appraise)
 
@@ -115,12 +137,7 @@
   :group 'git-appraise)
 
 (defface git-appraise-success-state-face
-  `((((class color) (background light))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "Green")
-    (((class color) (background  dark))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "Green"))
+  '((t :inherit success :weight bold))
   "Face used for success state (e.g. merged)."
   :group 'git-appraise)
 
@@ -130,12 +147,7 @@
   :group 'git-appraise)
 
 (defface git-appraise-pending-state-face
-  `((((class color) (background light))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "yellow4")
-    (((class color) (background  dark))
-     ,@(and (>= emacs-major-version 27) '(:extend t))
-     :foreground "DarkKhaki"))
+  '((t :inherit warning))
   "Face used for pending state."
   :group 'git-appraise)
 
@@ -181,12 +193,9 @@
   :group 'git-appraise)
 
 (defface git-appraise-dimmed
-  '((((class color) (background light))
-     :foreground "grey50")
-    (((class color) (background  dark))
-     :foreground "grey50"))
+  '((t :inherit shadow))
   "Face for text that shouldn't stand out."
-  :group 'magit-faces)
+  :group 'git-appraise)
 
 ;; Face used for hover interactions in Git Appraise buffers without
 ;; adding a background that would obscure diff colors.
@@ -199,10 +208,7 @@
 ;; Uses the same violet family as `git-appraise-constant-face' so
 ;; "there is a conversation here" reads as one visual language.
 (defface git-appraise-fringe-comment-face
-  '((((class color) (background light))
-     :foreground "dark violet")
-    (((class color) (background dark))
-     :foreground "MediumPurple1"))
+  '((t :inherit font-lock-constant-face))
   "Face for fringe markers flagging diff lines with review threads."
   :group 'git-appraise)
 

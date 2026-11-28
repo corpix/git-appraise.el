@@ -11,6 +11,10 @@
 (require 'git-appraise-badges)
 (require 'dash)
 
+(defcustom git-appraise-activity-indent 2
+  "Spaces before activity timestamps in expanded discussion sections."
+  :group 'git-appraise :type 'natnum)
+
 (defun git-appraise-comment-format-time (timestamp &optional now)
   "Format TIMESTAMP for a comment relative to local time NOW.
 Show only the clock time for today, day and month for another day
@@ -62,7 +66,8 @@ list of short labels such as \"DRAFT\" or \"OUTDATED\"."
 (defun git-appraise-comment-format-time-detail (label timestamp)
   "Return a highlighted LABEL and TIMESTAMP line for an opened section."
   (when-let* ((time (git-appraise-comment-format-time timestamp)))
-    (concat "  " (propertize label 'font-lock-face 'magit-dimmed) "  "
+    (concat (make-string git-appraise-activity-indent ?\s)
+            (propertize label 'font-lock-face 'magit-dimmed) "  "
             (propertize time 'font-lock-face 'git-appraise-timestamp-face)
             "\n")))
 

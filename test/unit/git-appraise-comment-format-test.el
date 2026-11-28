@@ -52,6 +52,11 @@
                        (substring-no-properties detail)))
         (should (eq 'git-appraise-timestamp-face
                     (get-text-property (string-match "04:20" detail)
-                                       'font-lock-face detail)))))))
+                                       'font-lock-face detail))))
+      (let ((git-appraise-activity-indent 4))
+        (should (string-prefix-p
+                 "    Posted"
+                 (git-appraise-comment-format-time-detail
+                  "Posted" timestamp)))))))
 
 ;;; git-appraise-comment-format-test.el ends here

@@ -82,7 +82,12 @@ removal if it reappears before pushing. Do not force-push the notes ref.
 
 `TAB` on a listed commit folds the commits group and returns to its heading.
 
-File headings show status, classification (such as GEN or DOC), added and
-deleted line counts, then the filename. The columns stay aligned while a large
+File headings show status, a configurable type (such as GEN, VEND, DOC, TEST,
+or SPEC), added and deleted line counts, then the filename. The columns stay aligned while a large
 file waits for its diff to load. Set `git-appraise-show-file-change-summary` to
 `nil` to hide the counts.
+The `git-appraise-file-types` map controls matching, labels, faces, folding,
+focus hiding, and sort bands. The five Linguist `.gitattributes` overrides
+are read from the reviewed commit. An explicit `linguist-language` appears
+in expanded file details; `linguist-detectable` is available for custom
+matching and has no automatic review tag.

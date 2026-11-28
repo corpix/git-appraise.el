@@ -43,8 +43,9 @@ The review buffer shows the request, commits, discussion, and file diffs.
 Discussion contains the full text of every review comment and reply, with
 links back to inline locations. Its groups can be folded, and their fold
 choices persist. Existing inline comments also appear next to their diff lines.
-File headings show change counts and tags such as `[DOC]` or `[GEN]`. Documentation,
-lockfiles, and generated output are classified and folded by default. Files
+File headings show change counts and configurable types such as `DOC`, `GEN`,
+`VEND`, `TEST`, and `SPEC`. Documentation, vendored files, lockfiles, and
+generated output are folded by default. Files
 marked `linguist-generated` or `linguist-vendored` in `.gitattributes` are
 excluded from the rendered diff by default; the Files changed heading reports
 the hidden count. Use `r x` to toggle that exclusion for the current buffer.
@@ -154,9 +155,29 @@ baseline for those bars is stored locally alongside the marks. See
 ;; M-x customize-face RET git-appraise-commented-hunk-face RET
 ```
 
-The `git-appraise-diff-file-order-rules` and
-`git-appraise-diff-noise-rules` options control file order, tags, and automatic
-folding. Use `M-x customize-group RET git-appraise RET` for the other options.
+`git-appraise-file-types` is the ordered map for matching paths and explicit
+Linguist language overrides to stable types. Each entry sets its visible
+label, face, default fold, focus hiding, and sort band. The defaults include
+generated, vendored, documentation, test, spec, and whitespace-only files.
+The file-tag column grows to fit custom labels; its minimum width is
+`git-appraise-file-tag-min-width`. `git-appraise-diff-file-order-rules` contains
+only regexps for paths to show first.
+
+The classifier reads all five Linguist `.gitattributes` overrides. Explicit
+`linguist-language` values appear in expanded file details; detectable values
+are available to custom type entries but do not hide files by default. Edit
+`git-appraise-file-types` with Customize or add a type, for example:
+
+```emacs-lisp
+(add-to-list 'git-appraise-file-types
+             '(config :paths ("\\`config/") :label "CFG"
+               :face font-lock-constant-face :collapse nil :hide nil :order 10))
+```
+
+All package-owned visual roles have customizable faces. Badge labels and
+faces live in `git-appraise-badge-styles`; SVG/text preference, SVG dimensions,
+activity indentation, and file tag width have separate options. Use
+`M-x customize-group RET git-appraise RET` for these settings.
 The background colors for your comments, the request author's comments, and
 other reviewers' comments are customizable through the
 `git-appraise-comment-self-bg`, `git-appraise-comment-author-bg`, and

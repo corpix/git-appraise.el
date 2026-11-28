@@ -29,70 +29,18 @@
 (require 'a)
 (require 'git-appraise-db)
 (require 'git-appraise-repo)
+(require 'git-appraise-file-types)
 
 (declare-function git-appraise--build-buffer "git-appraise-section")
 (defvar git-appraise-focus-mode nil)
 
 
 (defcustom git-appraise-diff-file-order-rules nil
-  "Rules to order and classify files in the diff.
-Each element is either a regexp string or a property list:
-
-  (:match REGEXP :tag TAG :collapse BOOL :hide BOOL)
-
-- A string is a pure ordering rule: files matching the first
-  regexp come first, then the second, and so on.
-- `:match' is the regexp (required for plist rules), tested
-  against the file path without the leading \"a/\" or \"b/\".
-- `:tag' shows TAG in the classification column before the file name.
-- `:collapse' starts the file section collapsed.  Files carrying
-  review comments are never auto-collapsed.
-- `:hide' removes the file while focus mode is on (see
-  `git-appraise-toggle-focus-mode').  The \"Files changed\" heading
-  always reports what is hidden, so nothing is lost.
-
-Files matching no user rule come next, and files matching the
-built-in `git-appraise-diff-noise-rules' sink to the bottom.
-
-Example:
-  (setq git-appraise-diff-file-order-rules
-        \\='(\"^src/\"                           ;; source first
-          (:match \"^\\\\(test/\\\\|tests/\\\\)\" :tag \"TEST\") ;; tests last
-          \"^\\\\(config/\\\\|\\\\.github/\\\\|\\\\.gitlab-ci\\\\.yml$\\\\)\")) ;; config"
+  "Regexps for files that should appear first, in rule order.
+File classification, labels, folding, and focus hiding are
+configured through `git-appraise-file-types'."
   :group 'git-appraise
-  :type
-  '(repeat
-    (choice (string :tag "Regexp (order only)")
-            (set (cons (const :match) (regexp :tag "Regexp"))
-                 (cons (const :tag) (string :tag "Tag"))
-                 (cons (const :collapse) (boolean :tag "Collapse by default"))
-                 (cons (const :hide) (boolean :tag "Hide in focus mode"))))))
-(defcustom git-appraise-diff-noise-rules
-  '((:match "\\`\\(package-lock\\.json\\|yarn\\.lock\\|pnpm-lock\\.yaml\\|Cargo\\.lock\\|flake\\.lock\\|poetry\\.lock\\|Gemfile\\.lock\\|composer\\.lock\\|mix\\.lock\\|Pipfile\\.lock\\|packages\\.lock\\.json\\)\\'"
-     :tag "GEN" :collapse t)
-    (:match "\\.lock\\'"
-     :tag "GEN" :collapse t)
-    (:match "\\`\\(dist\\|build\\|out\\)/\\|\\.min\\.[cm]?js\\'\\|\\.bundle\\.[cm]?js\\'\\|\\.map\\'"
-     :tag "GEN" :collapse t)
-    (:match "\\`\\(CHANGELOG\\|CHANGES\\|NEWS\\|HISTORY\\|AUTHORS\\|CREDITS\\)\\(\\.[^/]*\\)?\\'\\|/\\(doc\\|docs\\|documentation\\)/\\|\\.\\(md\\|markdown\\|rst\\|org\\)\\'\\|\\(^\\|/\\)README\\(\\.[^/]*\\)?\\'"
-     :tag "DOC" :collapse t))
-  "Built-in rules classifying low-signal files as noise.
-These come enabled by default so you don't have to maintain
-anything: lockfiles, generated/minified output and changelog/docs
-are tagged (e.g. GEN, DOC) and collapsed, and focus mode
-(see `git-appraise-toggle-focus-mode') hides them entirely.
-Set this variable to nil to disable all built-in classification.
-The same plist format of `git-appraise-diff-file-order-rules'
-applies, so you can add your own entries or place
-`git-appraise-diff-file-order-rules' entries after these to
-override them."
-  :group 'git-appraise
-  :type
-  '(repeat
-    (set (cons (const :match) (regexp :tag "Regexp"))
-         (cons (const :tag) (string :tag "Tag"))
-         (cons (const :collapse) (boolean :tag "Collapse by default"))
-         (cons (const :hide) (boolean :tag "Hide in focus mode")))))
+  :type '(repeat regexp))
 
 (defcustom git-appraise-exclude-gitattributes-generated t
   "When non-nil, exclude files marked generated or vendored by git attributes.
@@ -136,28 +84,19 @@ no-prefix \"diff --git old new\" form some tools return."
         (setq pos next)))
     (nreverse blocks)))
 
-(defun git-appraise--diff--rule-regexp (rule)
-  "Return the match regexp of RULE, or nil when it has none.
-A string rule matches as itself."
-  (cond ((stringp rule) rule)
-        ((plist-get rule :match))))
+(defun git-appraise--diff--classify-path (path &optional attrs)
+  "Return PATH's stable file type and appearance using Linguist ATTRS."
+  (git-appraise-file-types--classify path attrs))
 
-(defun git-appraise--diff--classify-path (path)
-  "Return plist (:tag ... :collapse ... :hide ...) for PATH.
-Merges `git-appraise-diff-file-order-rules' and
-`git-appraise-diff-noise-rules': the first rule that matches and
-sets a property wins for that property."
-  (let ((info nil))
-    (dolist (rule (append git-appraise-diff-file-order-rules
-                          git-appraise-diff-noise-rules))
-      (when-let* ((regexp (git-appraise--diff--rule-regexp rule))
-                  ((string-match-p regexp path)))
-        (dolist (key '(:tag :collapse :hide))
-          (unless (plist-member info key)
-            (when-let* ((val (and (not (stringp rule))
-                                  (plist-get rule key))))
-              (setq info (plist-put info key val)))))))
-    info))
+(defun git-appraise-diff--attribute-context ()
+  "Return (REPO SOURCE) for reading this review's Git attributes."
+  (let* ((pr (git-appraise-db-get-pullreq))
+         (repo (or (and (boundp 'git-appraise-repo-worktree)
+                        git-appraise-repo-worktree)
+                   default-directory))
+         (source (and pr (slot-boundp pr 'sha)
+                      (stringp (oref pr sha)) (oref pr sha))))
+    (list repo source)))
 
 (defun git-appraise-diff--stats (diff-text)
   "Compute the add/del line stats over raw DIFF-TEXT.
@@ -168,13 +107,18 @@ parenthetical).  Computed from the same diff text the wash renders.
 Binary blocks
 (\"GIT binary patch\" / \"Binary files ... differ\") carry no
 line counts."
-  (let ((files 0) (add 0) (del 0) (add-doc 0) (del-doc 0))
-    (dolist (blk (git-appraise--diff--split-by-files diff-text))
+  (let* ((blocks (git-appraise--diff--split-by-files diff-text))
+         (context (git-appraise-diff--attribute-context))
+         (attrs (git-appraise-file-types--attributes
+                 (mapcar #'car blocks) (car context) (cadr context)))
+         (files 0) (add 0) (del 0) (add-doc 0) (del-doc 0))
+    (dolist (blk blocks)
       (let* ((path (car blk))
              (block (cdr blk))
-             (doc? (equal (plist-get (git-appraise--diff--classify-path path)
-                                     :tag)
-                          "DOC"))
+             (doc? (eq (plist-get
+                        (git-appraise--diff--classify-path
+                         path (gethash path attrs)) :type)
+                       'documentation))
             (a 0) (d 0))
         (setq files (1+ files))
         (unless (string-match-p "^GIT binary patch\\|^Binary files " block)
@@ -282,89 +226,40 @@ Blocks without hunks (pure renames, binary, mode-only) return nil."
   (or (string-match-p "\n\\+[^+]" block)
       (string-match-p "\n-[^-]" block)))
 
-(defun git-appraise-diff--gitattributes-generated-paths (paths)
-  "Return hash table of PATHS marked generated or vendored by git attributes.
-Checks `linguist-generated' and `linguist-vendored'."
-  (let ((table (make-hash-table :test #'equal))
-        (repo (or (and (boundp 'git-appraise-repo-worktree)
-                       git-appraise-repo-worktree)
-                  default-directory)))
-    (when (and paths repo (file-directory-p repo))
-      (let ((default-directory (file-name-as-directory repo)))
-        (with-temp-buffer
-          (let* ((args (append '("check-attr" "linguist-generated" "linguist-vendored" "--")
-                               paths))
-                 (status (apply #'process-file "git" nil t nil args)))
-            (when (and (integerp status) (zerop status))
-              (goto-char (point-min))
-              (while (not (eobp))
-                (let ((line (buffer-substring-no-properties
-                             (line-beginning-position) (line-end-position))))
-                  (when (string-match "^\\(.+\\): \\(?:linguist-generated\\|linguist-vendored\\): \\(.+\\)$" line)
-                    (let ((path (match-string 1 line))
-                          (value (match-string 2 line)))
-                      (when (member value '("true" "set" "1"))
-                        (puthash path t table))))
-                  (forward-line 1))))))))
-    table))
-
 (defun git-appraise--diff--classify-diff (diff-text)
   "Classify every file of DIFF-TEXT.
-Return a hash table path -> plist (:tag :collapse :hide),
-combining:
-- rule-based classification from
-  `git-appraise-diff-file-order-rules' and
-  `git-appraise-diff-noise-rules';
-- pure renames ([MOVED]);
-- whitespace-only files ([WS-ONLY]), detected textually and,
-  when a local worktree is available, with `git diff -w';
-- phase 14 heat buckets ([HOT]/[WARM]/[COLD]) for the files the
-  checks above left untagged (noise classification wins).
-
-Comment anchors refer to the API diff, so classification only
-tags, collapses and hides: it never replaces the diff itself."
+Return a hash of path to stable type, style, and Linguist metadata.
+The diff content and comment anchors are never rewritten."
   (let* ((table (make-hash-table :test #'equal))
          (blocks (git-appraise--diff--split-by-files diff-text))
+         (context (git-appraise-diff--attribute-context))
+         (attributes (git-appraise-file-types--attributes
+                      (mapcar #'car blocks) (car context) (cadr context)))
          (substantive
           (ignore-errors
             (let ((pr (git-appraise-db-get-pullreq)))
               (and (slot-boundp pr 'number)
                    (git-appraise-repo-substantive-files
-                    (format "%s" (oref pr number)))))))
-         (generated
-          (when git-appraise-exclude-gitattributes-generated
-            (git-appraise-diff--gitattributes-generated-paths
-             (mapcar #'car blocks)))))
+                    (format "%s" (oref pr number))))))))
     (dolist (blk blocks)
       (let* ((path (car blk))
              (block (cdr blk))
-             (info (git-appraise--diff--classify-path path))
-             (tag (plist-get info :tag))
-             (generated? (and (hash-table-p generated)
-                              (gethash path generated))))
-        (when generated?
-          (setq tag (or tag "GEN")
-                info (plist-put (plist-put info :collapse t)
-                                :gitattributes-generated t)))
+             (attrs (gethash path attributes))
+             (info (git-appraise--diff--classify-path path attrs))
+             (generated? (or (eq (plist-get attrs :generated) 'set)
+                             (eq (plist-get attrs :vendored) 'set))))
         (cond
          ((git-appraise--diff--block-pure-rename-p block)
-          (setq tag nil
+          (setq info (git-appraise-file-types--info nil attrs)
                 info (plist-put info :collapse t)))
          ((git-appraise--diff--block-ws-only-p block)
-          (setq tag "WS-ONLY"
-                info (plist-put info :collapse t)))
+          (setq info (git-appraise-file-types--info 'whitespace attrs)))
          ((and substantive
                (git-appraise--diff--block-has-content-p block)
                (not (member path substantive)))
-          (setq tag "WS-ONLY"
-                info (plist-put info :collapse t))))
-        (when tag
-          (setq info (plist-put info :tag tag)))
-        ;; focus mode hides auto-flagged noise, unless a rule
-        ;; explicitly opted out with :hide nil
-        (when (and (member tag '("GEN" "DOC" "WS-ONLY"))
-                   (not (plist-member info :hide)))
-          (setq info (plist-put info :hide t)))
+          (setq info (git-appraise-file-types--info 'whitespace attrs))))
+        (when generated?
+          (setq info (plist-put info :linguist-excluded t)))
         (puthash path info table)))
     table))
 
@@ -451,32 +346,18 @@ identical ones across actions, browse, testimpact and viewed."
         ((string-prefix-p "b/" path) (substring path 2))
         (t path)))
 
-(defun git-appraise--diff--file-order-index (path)
+(defun git-appraise--diff--file-order-index (path &optional info)
   "Return the ordering index for PATH.
-User rules come first (in their order); files matching no user
-rule come next; files matching only `git-appraise-diff-noise-rules'
-sink to the very bottom, keeping noise out of the way."
+User regexps come first; otherwise INFO's type sort band applies."
   (let ((user git-appraise-diff-file-order-rules)
-        (noise git-appraise-diff-noise-rules)
         (idx 0)
         (found nil))
     (while (and user (not found))
       (let ((rule (pop user)))
-        (if (when-let* ((regexp (git-appraise--diff--rule-regexp rule)))
-              (string-match-p regexp path))
+        (if (string-match-p rule path)
             (setq found idx)
           (setq idx (1+ idx)))))
-    (or found
-        ;; not matched by user rules: check noise rules
-        (let ((j 0)
-              (noise-found nil))
-          (while (and noise (not noise-found))
-            (let ((rule (pop noise)))
-              (when (when-let* ((regexp (git-appraise--diff--rule-regexp rule)))
-                      (string-match-p regexp path))
-                (setq noise-found (+ idx 1 j))))
-            (setq j (1+ j)))
-          (or noise-found idx)))))
+    (or found (+ idx 1 (or (plist-get info :order) 0)))))
 
 (defun git-appraise--maybe-reorder-diff (diff-text &optional classifications)
   "Reorder DIFF-TEXT per the file rules, and honor focus mode.
@@ -485,7 +366,7 @@ CLASSIFICATIONS is the hash table produced by
 whose classification has a non-nil :hide are omitted from the
 buffer; they remain counted in the \"Files changed\" heading."
   (if (and (not git-appraise-diff-file-order-rules)
-           (not git-appraise-diff-noise-rules)
+           (not git-appraise-file-types)
            (not git-appraise-focus-mode)
            (not git-appraise-exclude-gitattributes-generated)
            ;; phase 13: new-since-last-review files jump the queue
@@ -499,8 +380,12 @@ buffer; they remain counted in the \"Files changed\" heading."
                     (if first-pos (substring diff-text first-pos) diff-text)))
            (sorted (sort blocks
                          (lambda (a b)
-                           (let* ((ia (git-appraise--diff--file-order-index (car a)))
-                                  (ib (git-appraise--diff--file-order-index (car b)))
+                           (let* ((ia (git-appraise--diff--file-order-index
+                                       (car a) (and classifications
+                                                    (gethash (car a) classifications))))
+                                  (ib (git-appraise--diff--file-order-index
+                                       (car b) (and classifications
+                                                    (gethash (car b) classifications))))
                                   (na (plist-get (and classifications
                                                       (gethash (car a)
                                                                classifications))
@@ -522,7 +407,7 @@ buffer; they remain counted in the \"Files changed\" heading."
                                 (hide? (or (and git-appraise-focus-mode
                                                 (plist-get info :hide))
                                            (and git-appraise-exclude-gitattributes-generated
-                                                (plist-get info :gitattributes-generated)))))
+                                                (plist-get info :linguist-excluded)))))
                            (unless hide?
                              (push blk acc))))
                        (nreverse acc))
