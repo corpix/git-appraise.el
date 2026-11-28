@@ -147,33 +147,48 @@
                                ,(propertize "▏" 'face
                                             'git-appraise-viewed-change-bar))))))
 
+(defun git-appraise-viewed-changes--show-marked (sections)
+  "Reveal file and hunk SECTIONS containing changed diff lines."
+  (save-excursion
+    (dolist (section (delete-dups (nreverse sections)))
+      (let ((file (oref section parent)))
+        (when (and (magit-file-section-p file) (oref file hidden))
+          (magit-section-show file))
+        (when (oref section hidden)
+          (magit-section-show section))))))
+
 (defun git-appraise-viewed-changes--paint ()
   "Paint prepared changed lines in the current review buffer."
   (--each (overlays-in (point-min) (point-max))
     (when (overlay-get it 'git-appraise-viewed-change-bar)
       (delete-overlay it)))
   (when (hash-table-p git-appraise-viewed-changes--targets)
-    (magit-map-sections
-     (lambda (section)
-       (when (magit-file-section-p section)
-         (let* ((path (git-appraise-viewed--file-path section))
-                (targets (copy-sequence
-                          (gethash path git-appraise-viewed-changes--targets)))
-                (limit (oref section end)))
-           (when targets
-             (if (eq (car targets) :heading)
-                 (git-appraise-viewed-changes--mark (oref section start))
-               (save-excursion
-                 (goto-char (oref section start))
-                 (let ((ordinal 0))
-                   (while (and (< (point) limit) targets)
-                     (when (git-appraise--patch-line-p)
-                       (cl-incf ordinal)
-                       (when (= ordinal (car targets))
-                         (git-appraise-viewed-changes--mark
-                          (line-beginning-position))
-                         (pop targets)))
-                     (forward-line 1))))))))))
+    (let (marked-sections)
+      (magit-map-sections
+       (lambda (section)
+         (when (magit-file-section-p section)
+           (let* ((path (git-appraise-viewed--file-path section))
+                  (targets (copy-sequence
+                            (gethash path git-appraise-viewed-changes--targets)))
+                  (limit (oref section end)))
+             (when targets
+               (if (eq (car targets) :heading)
+                   (git-appraise-viewed-changes--mark (oref section start))
+                 (save-excursion
+                   (goto-char (oref section start))
+                   (let ((ordinal 0))
+                     (while (and (< (point) limit) targets)
+                       (when (git-appraise--patch-line-p)
+                         (cl-incf ordinal)
+                         (when (= ordinal (car targets))
+                           (git-appraise-viewed-changes--mark
+                            (line-beginning-position))
+                           (when-let* ((hunk (magit-current-section)))
+                             (when (magit-hunk-section-p hunk)
+                               (push hunk marked-sections)))
+                           (pop targets)))
+                       (forward-line 1))))))))))
+      (git-appraise-viewed-changes--show-marked marked-sections))
     (git-appraise-viewed-changes--restore-window-margins)))
 
 (provide 'git-appraise-viewed-changes)

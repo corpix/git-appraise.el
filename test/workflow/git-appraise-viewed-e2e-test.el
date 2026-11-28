@@ -94,6 +94,52 @@
       (set-window-margins window (car old-margins) (cdr old-margins))
       (set-window-parameter window 'git-appraise-viewed-old-margins nil))))
 
+;;; req-2026-11-28-004: changed lines after a reviewed follow-up commit
+;; covers: git-appraise-viewed-changes.el git-appraise-folding.el git-appraise-section.el
+;; covers-fn: git-appraise-start, git-appraise-viewed-mark-file-and-fold, git-appraise-viewed-changes--paint
+;; enforcement: test
+(ert-deftest viewed-e2e/req-2026-11-28-004-follow-up-commit-bars ()
+  "WHEN a viewed file gains a commit THE SYSTEM SHALL show the changed tag and an orange bar beside each new diff line."
+  (git-appraise-viewed-e2e-test--with-review
+    (git-appraise-start revision)
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (search-forward "big.txt")
+      (beginning-of-line)
+      (execute-kbd-macro (kbd "V")))
+    (should (git-appraise-store-viewed-snapshot
+             directory revision "tester@example.com" "big.txt"))
+    (with-temp-file (expand-file-name "big.txt" directory)
+      (insert "l1\nL2-new\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nL10-new\nl11\nl12\n"))
+    (git-appraise-test--run directory "git" "commit" "-qam" "change viewed line")
+    (let ((last-commit (git-appraise-test--run
+                        directory "git" "show" "--format=" "--unified=0" "HEAD")))
+      (should (string-match-p "^+L2-new$" last-commit))
+      (should (string-match-p "^+L10-new$" last-commit)))
+    (kill-buffer (git-appraise-pr-buffer-name))
+    (git-appraise-start revision)
+    (git-appraise-test--drain-lazy (get-buffer (git-appraise-pr-buffer-name)))
+    (with-current-buffer (git-appraise-pr-buffer-name)
+      (goto-char (point-min))
+      (should (re-search-forward "^modified[ \t]+.*big\\.txt.*\\[CHANGED\\]" nil t))
+      (goto-char (point-min))
+      (dolist (added '("+L2-new" "+L10-new"))
+        (goto-char (point-min))
+        (should (search-forward added nil t))
+        (let* ((line (line-beginning-position))
+               (bar (--first (overlay-get it 'git-appraise-viewed-change-bar)
+                              (overlays-at line)))
+               (display (and bar (get-text-property
+                                  0 'display (overlay-get bar 'before-string)))))
+          (should-not (invisible-p line))
+          (should bar)
+          (should (eq (caar display) 'margin))
+          (should (eq (get-text-property 0 'face (cadr display))
+                      'git-appraise-viewed-change-bar))))
+      (should (>= (or (car (window-margins
+                           (get-buffer-window (current-buffer)))) 0) 1)))))
+
 ;;; req-2026-11-26-003: navigation skips fully viewed files
 ;; covers: git-appraise-actions.el git-appraise.el
 ;; covers-fn: git-appraise-next-unviewed-file
